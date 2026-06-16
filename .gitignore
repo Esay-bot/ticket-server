@@ -1,0 +1,12 @@
+*.o
+*.out
+*.exe
+*.so
+*.a
+build/
+cmake-build-*/
+*.log
+*.tmp
+*.swp
+.vscode/
+.DS_Store
