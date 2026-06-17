@@ -8,7 +8,9 @@
 #include <arpa/inet.h>
 #include <event.h>
 #include <jsoncpp/json/json.h>
-#include <mysql/mysql.h>
+#include "db_manager.h"
+#include "buffer.h"
+#include <memory>
 
 using namespace std;
 const int LIS_MAX = 10;
@@ -23,43 +25,6 @@ enum OP_TYPE
     MyReserve,
     Cancel,
     Exit
-};
-
-class mysql_client
-{
-public:
-    mysql_client()
-    {
-        db_ips = "127.0.0.1";
-        db_username = "root";
-        db_dbname = "Project_DB";
-        db_passwd = "211925";
-    }
-    // 自己再写一个有参构造函数
-
-    ~mysql_client()
-    {
-        mysql_close(&mysql_con);
-    }
-    bool mysql_ConnectServer();
-    bool mysql_Register(const string &tel, const string &passwd, const string &name);
-    bool mysql_Login(const string &tel, const string &passwd, string &name);
-    bool mysql_Show_Ticket(Json::Value &resval);
-    bool mysql_Reserve_Ticket(int tk_id, string tel);
-    bool mysql_MyReserve_Ticket(Json::Value &reserve);
-    bool User_Cancel_Reserve_Ticket(int yd_id,string tel);
-
-private:
-    bool mysql_user_begin();    // 开启事务
-    bool mysql_user_commit();   // 提交事务
-    bool mysql_user_rollback(); // 回滚
-
-private:
-    MYSQL mysql_con;
-    string db_ips;
-    string db_username;
-    string db_dbname;
-    string db_passwd;
 };
 
 class socket_listen
@@ -78,7 +43,7 @@ public:
         m_port = 6000;
         m_ips = "127.0.0.1";
     }
-    socket_listen(string ips, short port) : m_ips(ips), m_port(port)
+    socket_listen(string ips, short port) : m_port(port), m_ips(ips)
     {
         sockfd = -1;
     }
@@ -106,6 +71,8 @@ public:
     socket_con(int fd) : c(fd)
     {
         c_ev = NULL;
+        // 初始化数据库管理器
+        db_manager_ = std::make_unique<DBManager>();
     }
     void Set_ev(struct event *ev)
     {
@@ -113,7 +80,10 @@ public:
     }
     ~socket_con()
     {
-        event_free(c_ev);
+        if (c_ev)
+        {
+            event_free(c_ev);
+        }
         close(c);
     }
     void Recv_data();
@@ -122,16 +92,16 @@ public:
 
     void User_Register();
     void User_Login();
-    void User_Show_Ticket();    // 查看预约信息
-    void User_Reserve_Ticket(); // 预定
-
-    void User_MyReserve_Ticket();//查看我的预约
-    void User_Cancel_Reserve_Ticket();//取消我的预约
+    void User_Show_Ticket();           // 查看预约信息
+    void User_Reserve_Ticket();        // 预定
+    void User_MyReserve_Ticket();      // 查看我的预约
+    void User_Cancel_Reserve_Ticket(); // 取消我的预约
 
 private:
     int c;
     struct event *c_ev;
-
     Json::Value val;
-    // mysql_client cli;把数据库相关操作写入服务器连接的类里
+    std::unique_ptr<DBManager> db_manager_;
+    // 新增：每个连接独立缓冲区
+    Buffer inputBuf_;
 };
