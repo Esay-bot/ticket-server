@@ -7,7 +7,7 @@ LIBS = -levent -lmysqlclient -ljsoncpp -lpthread
 # 编译选项
 CXXFLAGS = -g -Wall $(INCS) -std=c++14
 # 所有服务端源文件
-SERVER_SRC = server/ser.cpp server/db_manager.cpp server/buffer.cpp
+SERVER_SRC = server/ser.cpp server/db_manager.cpp server/buffer.cpp server/connection.cpp
 SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
 SERVER_TARGET = server/server
 

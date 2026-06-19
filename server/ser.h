@@ -7,10 +7,11 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <event.h>
+#include <memory>
 #include <jsoncpp/json/json.h>
 #include "db_manager.h"
 #include "buffer.h"
-#include <memory>
+#include "connection.h"
 
 using namespace std;
 const int LIS_MAX = 10;
