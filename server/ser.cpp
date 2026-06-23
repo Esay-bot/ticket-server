@@ -1,94 +1,14 @@
 #include "ser.h"
 #include <memory>
 
-void businessMessageCallback(TcpConnection* conn, const std::string& jsonStr)
+//新回调：IO线程只打包任务丢入线程池
+void businessDispatch(TcpConnection* conn, const std::string& jsonStr)
 {
-    Json::Reader rd;
-    Json::Value val;
-    if (!rd.parse(jsonStr, val))
-    {
-        Json::Value err;
-        err["status"] = "ERR";
-        conn->sendResponse(err.toStyledString());
-        return;
-    }
-
-    int op = val["type"].asInt();
-    DBManager* db = conn->getDB();
-    if (!db->connect())
-    {
-        Json::Value err;
-        err["status"] = "ERR";
-        conn->sendResponse(err.toStyledString());
-        return;
-    }
-
-    Json::Value resp;
-    switch (op)
-    {
-    case Login:
-    {
-        string tel = val["user_tel"].asString();
-        string pwd = val["user_passwd"].asString();
-        string name;
-        if (db->userLogin(tel, pwd, name))
-        {
-            resp["status"] = "OK";
-            resp["user_name"] = name;
-        }
-        else
-            resp["status"] = "ERR";
-        break;
-    }
-    case Register:
-    {
-        string tel = val["user_tel"].asString();
-        string pwd = val["user_passwd"].asString();
-        string name = val["user_name"].asString();
-        if (db->userRegister(tel, pwd, name))
-            resp["status"] = "OK";
-        else
-            resp["status"] = "ERR";
-        break;
-    }
-    case View:
-    {
-        db->showTickets(resp);
-        break;
-    }
-    case Reserve:
-    {
-        int tkId = val["index"].asInt();
-        string tel = val["tel"].asString();
-        if (db->reserveTicket(tkId, tel))
-            resp["status"] = "OK";
-        else
-            resp["status"] = "ERR";
-        break;
-    }
-    case MyReserve:
-    {
-        string tel = val["tel"].asString();
-        db->getMyReservedTickets(tel, resp);
-        break;
-    }
-    case Cancel:
-    {
-        int ydId = val["index"].asInt();
-        string tel = val["tel"].asString();
-        if (db->cancelReservedTicket(ydId, tel))
-            resp["status"] = "OK";
-        else
-            resp["status"] = "ERR";
-        break;
-    }
-    default:
-        resp["status"] = "ERR";
-        break;
-    }
-    conn->sendResponse(resp.toStyledString());
+    Task task;
+    task.conn = conn;
+    task.jsonReq = jsonStr;
+    ThreadPool::getInstance().addTask(task);
 }
-
 bool socket_listen::socket_init()
 {
     sockfd = socket(AF_INET, SOCK_STREAM, 0);
@@ -130,7 +50,7 @@ void SOCK_LIS_CALLBACK(int sockfd, short ev, void *arg)
     if (cfd < 0) return;
     cout << "new client fd = " << cfd << endl;
 
-    auto newConn = make_unique<TcpConnection>(cfd, p->Get_base(), businessMessageCallback);
+    auto newConn = std::make_unique<TcpConnection>(cfd, p->Get_base(), businessDispatch);
     newConn->enableRead();
     ConnManager::getInstance().addConn(cfd, move(newConn));
 }
@@ -151,13 +71,38 @@ int main()
         exit(1);
     }
 
-    sock_ser.Set_base(base);
-    struct event *sock_ev = event_new(base, sock_ser.Get_sockfd(), EV_READ | EV_PERSIST, SOCK_LIS_CALLBACK, &sock_ser);
-    event_add(sock_ev, NULL);
+    // 创建匿名管道，用于跨线程唤醒IO线程
+    int pipefd[2];
+    if (pipe(pipefd) == -1)
+    {
+        perror("pipe create failed");
+        exit(1);
+    }
+    int pipeReadFd = pipefd[0];
+    int pipeWriteFd = pipefd[1];
 
+    // 单例线程池初始化，开启4个工作线程
+    ThreadPool& pool = ThreadPool::getInstance();
+    pool.init(4, base, pipeWriteFd);
+
+    // 注册管道读事件
+    struct event* pipeEv = event_new(base, pipeReadFd, EV_READ | EV_PERSIST, pipeReadCallback, nullptr);
+    event_add(pipeEv, nullptr);
+
+    sock_ser.Set_base(base);
+    struct event *sock_ev = event_new(base, sock_ser.Get_sockfd(), EV_READ | EV_PERSIST, SOCK_LIS_CALLBACK, &sock_ev);
+    event_add(sock_ev, nullptr);
+
+    // 启动事件循环
     event_base_dispatch(base);
 
+    // 程序退出，安全释放所有资源
+    pool.stop();
+    event_free(pipeEv);
     event_free(sock_ev);
     event_base_free(base);
+    close(pipeReadFd);
+    close(pipeWriteFd);
+
     return 0;
 }

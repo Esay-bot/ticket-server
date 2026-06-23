@@ -1,3 +1,5 @@
+#ifndef SER_H
+#define SER_H
 #include <iostream>
 #include <string.h>
 #include <string>
@@ -12,21 +14,12 @@
 #include "db_manager.h"
 #include "buffer.h"
 #include "connection.h"
+#include "threadpool.h"
+
 
 using namespace std;
 const int LIS_MAX = 10;
 
-// 登录     注册    查看预定 预定   查看我的预定 取消预定 退出
-enum OP_TYPE
-{
-    Login = 1,
-    Register,
-    View,
-    Reserve,
-    MyReserve,
-    Cancel,
-    Exit
-};
 
 class socket_listen
 {
@@ -64,45 +57,4 @@ public:
         return base;
     }
 };
-
-/// @brief
-class socket_con
-{
-public:
-    socket_con(int fd) : c(fd)
-    {
-        c_ev = NULL;
-        // 初始化数据库管理器
-        db_manager_ = std::make_unique<DBManager>();
-    }
-    void Set_ev(struct event *ev)
-    {
-        c_ev = ev;
-    }
-    ~socket_con()
-    {
-        if (c_ev)
-        {
-            event_free(c_ev);
-        }
-        close(c);
-    }
-    void Recv_data();
-    void Send_err();
-    void Send_ok();
-
-    void User_Register();
-    void User_Login();
-    void User_Show_Ticket();           // 查看预约信息
-    void User_Reserve_Ticket();        // 预定
-    void User_MyReserve_Ticket();      // 查看我的预约
-    void User_Cancel_Reserve_Ticket(); // 取消我的预约
-
-private:
-    int c;
-    struct event *c_ev;
-    Json::Value val;
-    std::unique_ptr<DBManager> db_manager_;
-    // 新增：每个连接独立缓冲区
-    Buffer inputBuf_;
-};
+#endif
