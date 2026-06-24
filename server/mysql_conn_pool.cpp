@@ -21,17 +21,16 @@ MysqlConnPool::~MysqlConnPool()
 DBManager* MysqlConnPool::createSingleConn()
 {
     DBManager* db = new DBManager(dbIp_, dbUser_, dbPwd_, dbName_, dbPort_);
-    // 获取原生MYSQL句柄，开启自动重连
-    MYSQL* mysql = db->getMysqlHandle();
-    char autoReconnect = 1;
-    mysql_options(mysql, MYSQL_OPT_RECONNECT, &autoReconnect);
-
+    // 先执行连接，连接成功后句柄才不为空
     if (!db->connect())
     {
         LOG_ERROR("create mysql connection failed");
         delete db;
         return nullptr;
     }
+    // 连接成功后再获取句柄，不再设置废弃的自动重连参数
+    MYSQL* mysql = db->getMysqlHandle();
+    (void)mysql; // 消除未使用变量警告
     return db;
 }
 

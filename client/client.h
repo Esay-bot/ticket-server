@@ -6,14 +6,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
-#include <event.h>
-#include<jsoncpp/json/json.h>
+#include <jsoncpp/json/json.h>
+#include <errno.h>
 using namespace std;
+
 const int OFFSET=2;
-
-            //登录     注册    查看预定 预定   查看我的预定 取消预定 退出 
+// 和服务端统一操作枚举
 enum OP_TYPE {Login=1,Register,View,Reserve,MyReserve,Cancel,Exit};
-
 
 class socket_client
 {
@@ -36,38 +35,33 @@ public:
         user_op = 0;
         runing=true;
     }
-
-    void print_info();
-
     ~socket_client()
     {
-        close(sockfd);
+        if(sockfd > 0) close(sockfd);
     }
 
+    // 协议封包：4字节大端长度 + json正文
+    string encodePacket(const string& body);
+    // 协议解包：读取完整数据包，返回json字符串
+    bool recvPacket(string& outJson);
+
+    void print_info();
     bool Connect_server();
     void User_Register();
     void User_Login();
     void User_Show_Ticket();
     void User_Reserve_Ticket();
-    //MyReserve,Cancel
     void User_MyResere_Ticket();
     void User_Cancel_Reserve_Ticket();
-    
     void Run();
-
 private:
     string ips;
     short port;
     int sockfd;
-
     bool dl_flg;
-
     string username;
     string usertel;
-
     int user_op;
     bool runing;
-
     Json::Value m_val;
-
 };
