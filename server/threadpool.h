@@ -10,6 +10,7 @@
 #include <atomic>
 #include <event.h>
 #include "connection.h"
+#include "mysql_conn_pool.h"
 
 // 前置声明枚举，不用引入ser.h,解决Login未识别
 enum OP_TYPE

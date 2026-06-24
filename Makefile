@@ -1,36 +1,34 @@
-# 编译器
-CXX = g++
-# 头文件路径
+CC = g++
+CXXFLAGS = -std=c++14 -Wall -g
+# MySQL头文件路径
 INCS = -I/usr/include/mysql
-# 依赖库：libevent mysql jsoncpp pthread
-LIBS = -levent -lmysqlclient -ljsoncpp -lpthread
-# 编译选项
-CXXFLAGS = -g -Wall $(INCS) -std=c++14
-# 所有服务端源文件
-SERVER_SRC = server/ser.cpp server/db_manager.cpp server/buffer.cpp server/connection.cpp server/threadpool.cpp server/log.cpp
-SERVER_OBJ = $(SERVER_SRC:.cpp=.o)
-SERVER_TARGET = server/server
+# 链接库
+LIBS = -lmysqlclient -levent -ljsoncpp -lpthread
 
-# 客户端源文件
-CLIENT_SRC = client/client.cpp
-CLIENT_OBJ = $(CLIENT_SRC:.cpp=.o)
-CLIENT_TARGET = client/client
+# 所有server目录下cpp，包含新增连接池、日志
+SRCS = server/ser.cpp \
+       server/db_manager.cpp \
+       server/buffer.cpp \
+       server/connection.cpp \
+       server/threadpool.cpp \
+       server/log.cpp \
+       server/mysql_conn_pool.cpp
 
-# 总目标
-all: $(SERVER_TARGET) $(CLIENT_TARGET)
+# 输出可执行文件
+TARGET = server/server
+# 自动生成对应.o
+OBJS = $(SRCS:.cpp=.o)
 
-# 编译服务端
-$(SERVER_TARGET): $(SERVER_OBJ)
-	$(CXX) $(CXXFLAGS) $(SERVER_OBJ) -o $@ $(LIBS)
+all: $(TARGET)
 
-# 编译客户端
-$(CLIENT_TARGET): $(CLIENT_OBJ)
-	$(CXX) $(CXXFLAGS) $(CLIENT_OBJ) -o $@ $(LIBS)
+# 链接
+$(TARGET): $(OBJS)
+	$(CC) $(CXXFLAGS) $(OBJS) -o $(TARGET) $(INCS) $(LIBS)
 
-# 自动生成.o
+# 编译规则，适配server/子目录
 %.o: %.cpp
-	$(CXX) $(CXXFLAGS) -c $< -o $@
+	$(CC) $(CXXFLAGS) $(INCS) -c $< -o $@
 
-# 清理编译产物
+# 清理所有.o、程序、日志切割文件
 clean:
-	rm -rf $(SERVER_OBJ) $(CLIENT_OBJ) $(SERVER_TARGET) $(CLIENT_TARGET) *.out
+	rm -rf $(OBJS) $(TARGET) *.log.*

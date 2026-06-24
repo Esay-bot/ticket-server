@@ -5,7 +5,7 @@
 #include "log.h"
 
 TcpConnection::TcpConnection(int fd, struct event_base* base, MessageCallback cb)
-    : fd_(fd), base_(base), readEv_(nullptr), msgCb_(cb), db_(std::make_unique<DBManager>())
+    : fd_(fd), base_(base), readEv_(nullptr), msgCb_(cb)
 {
     // 创建持久读事件
     readEv_ = event_new(base_, fd, EV_READ | EV_PERSIST, TcpConnection::readEventCallback, this);

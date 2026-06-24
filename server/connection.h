@@ -2,7 +2,6 @@
 #define CONNECTION_H
 
 #include "buffer.h"
-#include "db_manager.h"
 #include <event.h>
 #include <string>
 #include <memory>
@@ -24,7 +23,6 @@ public:
     void sendResponse(const std::string &jsonResp); // 给客户端的数据加上4字节长度头，好直接发
     // 获取缓冲区，数据库，fd接口
     Buffer &getInputBuf() { return inputBuf_; }
-    DBManager *getDB() { return db_.get(); }
     int getFd() { return fd_; }
 
 private:
@@ -36,7 +34,6 @@ private:
     struct event *readEv_;          // 读事件对象
     MessageCallback msgCb_;         // 业务回调函数指针(自带当前连接对象和json字符串)
     Buffer inputBuf_;               // 接收缓冲区
-    std::unique_ptr<DBManager> db_; // 连接独立数据库实例
     Json::Value jsonVal_;           // 临时json存储
 };
 

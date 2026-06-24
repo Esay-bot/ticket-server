@@ -49,12 +49,16 @@ public:
     bool reserveTicket(int tk_id, const string& tel);
     bool getMyReservedTickets(const string& tel, Json::Value& reserve);
     bool cancelReservedTicket(int yd_id, const string& tel);
+    
+    // 获取原生MYSQL句柄（供连接池心跳检测）
+    MYSQL* getMysqlHandle() const { return mysql_con_; }
+    
+    // 获取查询结果集
+    MYSQL_RES* getQueryResult(const string& sql);
 
 private:
     // 安全执行SQL（防止SQL注入基础版，生产环境建议用预处理）
     bool executeSQL(const string& sql);
-    // 获取查询结果集
-    MYSQL_RES* getQueryResult(const string& sql);
     // 释放结果集
     void freeResult(MYSQL_RES* res);
 

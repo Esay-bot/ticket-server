@@ -15,6 +15,7 @@
 #include "buffer.h"
 #include "connection.h"
 #include "threadpool.h"
+#include "log.h"
 
 
 using namespace std;
