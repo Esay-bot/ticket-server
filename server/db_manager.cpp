@@ -1,6 +1,7 @@
 #include "db_manager.h"
 #include <cstdio>
 #include <cstdlib>
+#include "log.h"
 
 bool DBManager::connect() {
     if (mysql_con_) {
@@ -10,7 +11,7 @@ bool DBManager::connect() {
 
     mysql_con_ = mysql_init(nullptr);
     if (!mysql_con_) {
-        cerr << "mysql_init failed: " << mysql_error(mysql_con_) << endl;
+        LOG_ERROR("mysql_init failed: " + std::string(mysql_error(mysql_con_)));
         return false;
     }
 
@@ -23,7 +24,7 @@ bool DBManager::connect() {
                                    nullptr,
                                    0);
     if (!mysql_con_) {
-        cerr << "mysql_real_connect failed: " << mysql_error(mysql_con_) << endl;
+        LOG_ERROR("mysql_real_connect failed: " + std::string(mysql_error(mysql_con_)));
         mysql_close(mysql_con_);
         mysql_con_ = nullptr;
         return false;
@@ -136,7 +137,7 @@ bool DBManager::reserveTicket(int tk_id, const string& tel) {
     if (row_num != 1) {
         freeResult(res);
         rollbackTransaction();
-        cerr << "ticket record not unique: tk_id=" << tk_id << endl;
+        LOG_ERROR("ticket record not unique: tk_id=" + std::to_string(tk_id));
         return false;
     }
 
@@ -153,7 +154,7 @@ bool DBManager::reserveTicket(int tk_id, const string& tel) {
 
     if (tk_max <= tk_num) {
         rollbackTransaction();
-        cerr << "no available tickets: tk_id=" << tk_id << endl;
+        LOG_WARN("no available tickets: tk_id=" + std::to_string(tk_id));
         return false;
     }
 
@@ -235,7 +236,7 @@ bool DBManager::cancelReservedTicket(int yd_id, const string& tel) {
     if (row_num != 1) {
         freeResult(res);
         rollbackTransaction();
-        cerr << "reserve record not found: yd_id=" << yd_id << ", tel=" << tel << endl;
+        LOG_WARN("reserve record not found: yd_id=" + std::to_string(yd_id) + ", tel=" + tel);
         return false;
     }
 
@@ -275,12 +276,12 @@ bool DBManager::cancelReservedTicket(int yd_id, const string& tel) {
 
 bool DBManager::executeSQL(const string& sql) {
     if (!mysql_con_) {
-        cerr << "not connected to database" << endl;
+        LOG_ERROR("get query result failed: " + std::string(mysql_error(mysql_con_)));
         return false;
     }
 
     if (mysql_query(mysql_con_, sql.c_str()) != 0) {
-        cerr << "execute SQL failed: " << sql << ", err: " << mysql_error(mysql_con_) << endl;
+        LOG_ERROR("get query result failed: " + std::string(mysql_error(mysql_con_)));
         return false;
     }
 
@@ -292,7 +293,7 @@ MYSQL_RES* DBManager::getQueryResult(const string& sql) {
 
     MYSQL_RES* res = mysql_store_result(mysql_con_);
     if (!res) {
-        cerr << "get query result failed: " << mysql_error(mysql_con_) << endl;
+        LOG_ERROR("get query result failed: " + std::string(mysql_error(mysql_con_)));
     }
 
     return res;

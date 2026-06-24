@@ -2,6 +2,7 @@
 #include <iostream>
 #include <cstring>
 #include <unistd.h>
+#include "log.h"
 
 TcpConnection::TcpConnection(int fd, struct event_base* base, MessageCallback cb)
     : fd_(fd), base_(base), readEv_(nullptr), msgCb_(cb), db_(std::make_unique<DBManager>())
@@ -52,7 +53,7 @@ void TcpConnection::handleRead()
     ssize_t n=inputBuf_.readFd(fd_,&saveErrno);//从fd读数据存入当前连接的inputBuf缓冲区
     if(n<=0)//客户端关闭连接/读取出错，释放资源
     {
-        std::cout<<"client fd:"<<fd_<<"disconnect"<<std::endl;
+        LOG_INFO("client fd=" + std::to_string(fd_) + " disconnect");
         closeConn();
         return;
     }
@@ -67,7 +68,7 @@ void TcpConnection::handleRead()
         inputBuf_.retrieve(sizeof(int32_t));
         //取出完整json报文
         std::string jsonStr=inputBuf_.retrieveAsString(bodyLen);
-        std::cout<<"recv json:"<<jsonStr<<std::endl;
+        LOG_DEBUG("fd=" + std::to_string(fd_) + " recv json: " + jsonStr);
         msgCb_(this,jsonStr);//调用外部传入的业务回调，将报文交给ser处理登录/购票逻辑
     }
 

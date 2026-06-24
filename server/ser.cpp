@@ -24,7 +24,7 @@ bool socket_listen::socket_init()
     int res = bind(sockfd, (struct sockaddr *)&saddr, sizeof(saddr));
     if (-1 == res)
     {
-        cout << "bind err" << endl;
+        LOG_ERROR("bind socket failed");
         close(sockfd);
         return false;
     }
@@ -48,7 +48,7 @@ void SOCK_LIS_CALLBACK(int sockfd, short ev, void *arg)
 
     int cfd = p->accept_client();
     if (cfd < 0) return;
-    cout << "new client fd = " << cfd << endl;
+    LOG_INFO("new client connect fd=" + std::to_string(cfd));
 
     auto newConn = std::make_unique<TcpConnection>(cfd, p->Get_base(), businessDispatch);
     newConn->enableRead();
@@ -57,10 +57,14 @@ void SOCK_LIS_CALLBACK(int sockfd, short ev, void *arg)
 
 int main()
 {
+     // 日志初始化，线上用LOG_INFO，调试改为LOG_DEBUG
+    Log::getInstance()->init(LOG_INFO, "server.log", 10*1024*1024);
+    LOG_INFO("ticket server starting...");
+
     socket_listen sock_ser;
     if (!sock_ser.socket_init())
     {
-        cout << "socket init err" << endl;
+        LOG_ERROR("socket init failed, exit");
         exit(1);
     }
 
@@ -75,7 +79,7 @@ int main()
     int pipefd[2];
     if (pipe(pipefd) == -1)
     {
-        perror("pipe create failed");
+        LOG_ERROR("create pipe failed, errno:" + std::string(strerror(errno)));
         exit(1);
     }
     int pipeReadFd = pipefd[0];

@@ -2,6 +2,7 @@
 #include <iostream>
 #include <unistd.h>
 #include <cstring>
+#include "log.h"
 
 // 单例实现
 ThreadPool& ThreadPool::getInstance()
@@ -73,6 +74,7 @@ void ThreadPool::workerLoop()
 
         if (!parseOk)
         {
+            LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
             resp["status"] = "ERR";
         }
         else
@@ -80,6 +82,7 @@ void ThreadPool::workerLoop()
             DBManager* db = task.conn->getDB();
             if (!db->connect())
             {
+                LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                 resp["status"] = "ERR";
             }
             else
@@ -99,6 +102,7 @@ void ThreadPool::workerLoop()
                     }
                     else
                     {
+                        LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                         resp["status"] = "ERR";
                     }
                     break;
@@ -111,7 +115,10 @@ void ThreadPool::workerLoop()
                     if (db->userRegister(tel, pwd, name))
                         resp["status"] = "OK";
                     else
+                    {
+                        LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                         resp["status"] = "ERR";
+                    }     
                     break;
                 }
                 case View:
@@ -125,8 +132,10 @@ void ThreadPool::workerLoop()
                     std::string tel = val["tel"].asString();
                     if (db->reserveTicket(tkId, tel))
                         resp["status"] = "OK";
-                    else
+                    else{
+                       LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                         resp["status"] = "ERR";
+                    }
                     break;
                 }
                 case MyReserve:
@@ -141,12 +150,16 @@ void ThreadPool::workerLoop()
                     std::string tel = val["tel"].asString();
                     if (db->cancelReservedTicket(ydId, tel))
                         resp["status"] = "OK";
-                    else
+                    else{
+                        LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                         resp["status"] = "ERR";
+                    }
                     break;
                 }
                 default:
+                {LOG_ERROR("fd=" + std::to_string(task.conn->getFd()) + " db connect failed");
                     resp["status"] = "ERR";
+                }
                     break;
                 }
             }
