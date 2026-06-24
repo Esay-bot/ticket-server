@@ -10,3 +10,11 @@ cmake-build-*/
 *.swp
 .vscode/
 .DS_Store
+# 项目可执行文件
+server/server
+client/client
+
+# 核心转储崩溃文件
+core
+core.*
+*.log.*
