@@ -11,9 +11,11 @@ SOURCES += \
     src/main.cpp \
     src/mainwindow.cpp \
     src/protocolcodec.cpp \
-    src/tcpclient.cpp
+    src/tcpclient.cpp \
+    src/logindialog.cpp
 
 HEADERS += \
     src/mainwindow.h \
     src/protocolcodec.h \
-    src/tcpclient.h
+    src/tcpclient.h \
+    src/logindialog.h
