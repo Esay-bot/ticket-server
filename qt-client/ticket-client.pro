@@ -13,7 +13,8 @@ SOURCES += \
     src/protocolcodec.cpp \
     src/tcpclient.cpp \
     src/logindialog.cpp \
-    src/tickettablemodel.cpp
+    src/tickettablemodel.cpp \
+    src/reservetablemodel.cpp
 
 HEADERS += \
     src/mainwindow.h \
@@ -21,4 +22,6 @@ HEADERS += \
     src/tcpclient.h \
     src/logindialog.h \
     src/tickettablemodel.h \
-    src/jsonutil.h
+    src/reservetablemodel.h \
+    src/jsonutil.h \
+    src/appconfig.h

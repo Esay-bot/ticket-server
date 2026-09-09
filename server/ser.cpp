@@ -22,6 +22,10 @@ bool socket_listen::socket_init()
         return false;
     }
 
+    // 允许 kill 后立即重启: 避免旧连接 TIME_WAIT 导致 bind 失败(EADDRINUSE)
+    int reuse = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+
     struct sockaddr_in saddr;
     memset(&saddr, 0, sizeof(saddr));
     saddr.sin_family = AF_INET;

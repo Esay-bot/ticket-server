@@ -1,5 +1,6 @@
 #include "logindialog.h"
 #include "tcpclient.h"
+#include "appconfig.h"
 
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -73,7 +74,7 @@ void LoginDialog::showEvent(QShowEvent *e)
     QDialog::showEvent(e);
     // 首次显示即发起连接(重复调用由 TcpClient 内部去重)
     if (!m_client->isConnected())
-        m_client->connectToHost(QStringLiteral("127.0.0.1"), 6000);
+        m_client->connectToHost(AppConfig::kServerHost, AppConfig::kServerPort);
 }
 
 void LoginDialog::applyMode()
@@ -130,7 +131,7 @@ void LoginDialog::onPrimaryAction()
 
     if (!m_client->isConnected()) {
         m_statusLabel->setText(QStringLiteral("尚未连接服务器，正在连接，请稍候重试"));
-        m_client->connectToHost(QStringLiteral("127.0.0.1"), 6000);
+        m_client->connectToHost(AppConfig::kServerHost, AppConfig::kServerPort);
         return;
     }
 
