@@ -25,3 +25,6 @@ HEADERS += \
     src/reservetablemodel.h \
     src/jsonutil.h \
     src/appconfig.h
+
+RESOURCES += \
+    res/ticket-client.qrc

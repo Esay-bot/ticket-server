@@ -1,0 +1,123 @@
+/* 票务预约系统 Qt 客户端 · 统一样式(M6, 刻意保持简洁) */
+
+QWidget {
+    font-family: "Microsoft YaHei", "Noto Sans CJK SC", "PingFang SC", sans-serif;
+    font-size: 13px;
+}
+
+QMainWindow, QDialog {
+    background: #f5f6f8;
+}
+
+/* ---- 按钮 ---- */
+QPushButton {
+    background: #ffffff;
+    color: #2c3e50;
+    border: 1px solid #c8ccd4;
+    border-radius: 4px;
+    padding: 5px 14px;
+}
+QPushButton:hover {
+    border-color: #3498db;
+    color: #2471a3;
+}
+QPushButton:pressed {
+    background: #e8f1f8;
+}
+QPushButton:disabled {
+    color: #aeb4bd;
+    border-color: #dde0e5;
+    background: #f2f3f5;
+}
+
+/* 重连按钮用醒目的暖色(断线时它是唯一可点的操作出口) */
+QPushButton#reconnectBtn {
+    color: #ffffff;
+    background: #e67e22;
+    border: 1px solid #d35400;
+}
+QPushButton#reconnectBtn:hover {
+    background: #f0982e;
+}
+QPushButton#reconnectBtn:disabled {
+    background: #f2d5b3;
+    border-color: #f2d5b3;
+    color: #ffffff;
+}
+
+/* 登录对话框主按钮 */
+QPushButton#primaryBtn {
+    color: #ffffff;
+    background: #3498db;
+    border: 1px solid #2e86c1;
+}
+QPushButton#primaryBtn:hover {
+    background: #4aa3e3;
+}
+QPushButton#primaryBtn:disabled {
+    background: #aed6f1;
+    border-color: #aed6f1;
+    color: #ffffff;
+}
+QPushButton#switchBtn {
+    border: none;
+    color: #2471a3;
+    background: transparent;
+}
+
+/* ---- 输入框 ---- */
+QLineEdit {
+    padding: 4px 6px;
+    border: 1px solid #c8ccd4;
+    border-radius: 4px;
+    background: #ffffff;
+    selection-background-color: #3498db;
+    selection-color: #ffffff;
+}
+QLineEdit:focus {
+    border-color: #3498db;
+}
+
+/* ---- 表格 ---- */
+QTableView {
+    background: #ffffff;
+    alternate-background-color: #f4f7fa;
+    gridline-color: #e3e6eb;
+    border: 1px solid #d7dbe1;
+    selection-background-color: #d6eaf8;
+    selection-color: #1b2631;
+}
+QTableView::item {
+    padding: 4px 6px;
+}
+QHeaderView::section {
+    background: #eceff3;
+    color: #2c3e50;
+    border: none;
+    border-right: 1px solid #d7dbe1;
+    border-bottom: 1px solid #d7dbe1;
+    padding: 6px 8px;
+}
+
+/* ---- 页签 ---- */
+QTabBar::tab {
+    padding: 6px 18px;
+    background: #e8eaee;
+    border: 1px solid #c8ccd4;
+    border-bottom: none;
+    border-top-left-radius: 4px;
+    border-top-right-radius: 4px;
+}
+QTabBar::tab:selected {
+    background: #ffffff;
+    color: #2471a3;
+}
+
+/* ---- 状态栏 ---- */
+QStatusBar {
+    background: #eceff3;
+    color: #5d6d7e;
+}
+QStatusBar::item {
+    border: none;
+}
