@@ -28,6 +28,16 @@ TcpClient::TcpClient(QObject *parent)
     connect(&timer_, &QTimer::timeout, this, &TcpClient::onTimeout);
 }
 
+TcpClient::~TcpClient()
+{
+    // 析构顺序陷阱: QTcpSocket 关闭连接时会发出 disconnected/errorOccurred,
+    // 若在成员销毁阶段触发本类槽函数, 将访问已析构的 timer_/codec_(未定义行为,
+    // 实测在 model_test 收尾阶段段错误)。先停定时器, 再屏蔽 socket 信号后关闭。
+    timer_.stop();
+    socket_.blockSignals(true);
+    socket_.abort();
+}
+
 void TcpClient::connectToHost(const QString &host, quint16 port)
 {
     if (socket_.state() == QAbstractSocket::ConnectedState

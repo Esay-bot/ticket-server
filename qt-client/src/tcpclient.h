@@ -24,6 +24,7 @@ public:
     static const int kTimeoutMs = 5000;   // 与旧客户端 SO_RCVTIMEO 对齐
 
     explicit TcpClient(QObject *parent = nullptr);
+    ~TcpClient() override;
 
     void connectToHost(const QString &host, quint16 port);
     void disconnectFromHost();
