@@ -1,0 +1,100 @@
+#include "connection.h"
+#include <iostream>
+#include <cstring>
+#include <unistd.h>
+#include <cerrno>
+#include "log.h"
+
+namespace
+{
+bool sendAll(int fd, const char *data, size_t len)
+{
+    size_t sent = 0;
+    while (sent < len)
+    {
+        ssize_t n = send(fd, data + sent, len - sent, 0);
+        if (n < 0)
+        {
+            if (errno == EINTR)
+                continue;
+            return false;
+        }
+        if (n == 0)
+            return false;
+        sent += static_cast<size_t>(n);
+    }
+    return true;
+}
+}
+
+TcpConnection::TcpConnection(int fd, struct event_base *base, MessageCallback cb)
+    : fd_(fd), base_(base), readEv_(nullptr), msgCb_(cb)
+{
+    // 创建持久读事件
+    readEv_ = event_new(base_, fd, EV_READ | EV_PERSIST, TcpConnection::readEventCallback, this);
+}
+TcpConnection::~TcpConnection() // 释放所有资源，防止fd、event、内存泄漏
+{
+    if (readEv_)
+    {
+        event_free(readEv_);
+        readEv_ = nullptr;
+    }
+    if (fd_ > 0)
+    {
+        close(fd_);
+    }
+}
+void TcpConnection::enableRead() // 将读事件注册到事件循环，开始监听客户端数据
+{
+    if (readEv_)
+        event_add(readEv_, nullptr);
+}
+void TcpConnection::closeConn() // 关闭连接：先从全局管理器移除，再销毁自身
+{
+    ConnManager::getInstance().delConn(fd_);
+}
+void TcpConnection::sendResponse(const std::string &jsonResp) // 统一发包函数，内部封装(4字节长度头+json)
+{
+    Buffer sendBuf;
+    sendBuf.appendInt32(jsonResp.size()); // 写入网络序4字节长度
+    sendBuf.append(jsonResp);             // 追加报文
+    if (!sendAll(fd_, sendBuf.peek(), sendBuf.readableBytes()))
+    {
+        LOG_ERROR("send response failed, fd=" + std::to_string(fd_));
+        closeConn();
+    }
+}
+void TcpConnection::readEventCallback(int fd, short ev, void *arg) // libevent静态读回调，转发到成员函数handleRead
+{
+    TcpConnection *conn = static_cast<TcpConnection *>(arg);
+    if (ev & EV_READ)
+    {
+        conn->handleRead();
+    }
+}
+void TcpConnection::handleRead()
+{
+    int saveErrno = 0;
+    ssize_t n = inputBuf_.readFd(fd_, &saveErrno); // 从fd读数据存入当前连接的inputBuf缓冲区
+    if (n <= 0)                                    // 客户端关闭连接/读取出错，释放资源
+    {
+        LOG_INFO("client fd=" + std::to_string(fd_) + " disconnect");
+        closeConn();
+        return;
+    }
+    while (inputBuf_.readableBytes() >= sizeof(int32_t)) // 循环拆报，处理粘宝，半包
+    {
+        // 读取前4字节包长度
+        int32_t bodyLen = inputBuf_.peekInt32();
+        // 缓冲区剩余数据不够一个包，跳出循环等待下次recv
+        if (inputBuf_.readableBytes() < sizeof(int32_t) + bodyLen)
+            break;
+        // 跳过4字节长度头
+        inputBuf_.retrieve(sizeof(int32_t));
+        // 取出完整json报文
+        std::string jsonStr = inputBuf_.retrieveAsString(bodyLen);
+        LOG_DEBUG("fd=" + std::to_string(fd_) + " recv json: " + jsonStr);
+        msgCb_(this, jsonStr); // 调用外部传入的业务回调，将报文交给ser处理登录/购票逻辑
+    }
+}

@@ -1,0 +1,33 @@
+# ===== 编译产物 =====
+*.o
+*.obj
+server/ser
+client/test
+server.log
+
+# ===== qmake/CMake 构建目录 =====
+build/
+build-*/
+.qmake.stash
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# ===== Qt 生成文件 =====
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*.pro.user
+*.pro.user.*
+
+# ===== IDE / 编辑器 =====
+.vscode/
+.idea/
+compile_commands.json
+
+# ===== 与本项目代码无关的个人文件 =====
+_new_cpp.pdf
+学习Agent路线-提取.md
+王思雨-*-简历.html
+王思雨-*-简历.pdf
