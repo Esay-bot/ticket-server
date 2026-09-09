@@ -3,6 +3,7 @@
 *.obj
 server/ser
 client/test
+client/cli
 server.log
 
 # ===== qmake/CMake 构建目录 =====
