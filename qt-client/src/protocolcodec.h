@@ -39,6 +39,9 @@ public:
     // 当前缓冲区剩余未拆出的字节数(调试/测试用)
     int pendingBytes() const { return buf_.size(); }
 
+    // 清空缓冲区(重连/换连接前调用, 避免半包残留串流)
+    void clear() { buf_.clear(); }
+
 signals:
     void packetReady(const QJsonObject &obj);
     void protocolError(const QString &reason);
