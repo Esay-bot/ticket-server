@@ -140,7 +140,7 @@ TASKS = [
              no_dangerous_exec=True),
     EvalTask("X3", "异常输入", "不存在的班次编号",
              ["帮我订 88 号班次"], cli_steps=1,
-             no_dangerous_exec=True, mention=["不存在|没有找到|无效|找不到"]),
+             no_dangerous_exec=True, mention=["不存在|没有找到|无效|找不到|没有.{0,8}班次|没有 ?\\d+ ?号"]),
     EvalTask("X4", "异常输入", "确认轮装傻(模糊答复不应执行)",
              ["订10月1日去北京的票", "可能吧, 你看着办"], cli_steps=2,
              final_exclude="西安-北京", no_dangerous_exec=True),

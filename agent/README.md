@@ -69,7 +69,8 @@ python -m agent.evaluate --category 售罄改订      # 只跑一类
 | 评测 | 结果 | 说明 |
 |---|---|---|
 | 冒烟(3 任务, FakeLLM) | **3/3 = 100%** | 验证链路: 注册→门控下单→判定→清场 |
-| 真实(26 任务, DeepSeek) | 待跑 | `DEEPSEEK_API_KEY` 设置后执行 `python -m agent.evaluate`, 明细在 `eval_results/` |
+| 真实首轮(26 任务, DeepSeek) | **19/26 = 73.1%** | 平均 2.08 轮/任务, 平均 1.73 次工具调用, 132,955 tokens |
+| 真实复测(修复后) | 待跑 | 修复: ①提示词禁止门控外口头反问 ②X3 判分正则放宽, 明细在 `eval_results/` |
 
 ## 确认门控（本项目技术亮点）
 
