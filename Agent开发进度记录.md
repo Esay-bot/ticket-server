@@ -26,3 +26,33 @@
 **遗留**：`DEEPSEEK_API_KEY` 本机未设置，M3/M4 的真实 LLM 调用与评测数据待用户提供 Key 后跑出。
 
 ---
+
+## Agent-M1 协议客户端（提交：`Agent-M1`）
+
+**目标**：Python 重新实现「4 字节大端长度头 + JSON」协议，`TicketClient` 类 + 粘包/半包处理 + 请求锁。
+
+**完成内容**（`agent/protocol.py`，约 200 行）：
+
+1. **编码** `encode_frame()`：`struct.pack('>I', len(body)) + body`，正文 `ensure_ascii=False` 按 utf-8 字节计长（与 C++ 端 `sendStr.size()` 语义一致）；请求超 4096 字节提前拦截。
+2. **解码** `try_extract_frame()`：纯函数，缓冲不足返回 `(None, buf)` 继续收；长度 0 或 >4096 抛 `ProtocolError`；调用方收到该异常立即断连（字节流已失步，不可恢复）。
+3. **`TicketClient`**：`connect()/request()/close()`，支持 with 语法与测试用 socket 注入；`_recv_one_frame()` 循环凑帧，粘包多余字节留在 `_recv_buf` 给下次 `request()` 优先消费；`socket.timeout`(5s)/连接断开 → `TransportError` 并自动 close；响应非 JSON 对象 → `ProtocolError`。
+4. **请求锁**：`threading.Lock` 覆盖「发送→接收→解析」整个临界区——服务端严格一问一答且响应不回显请求 type（`threadpool.cpp` 无请求标识字段），并发交错会把响应配错请求。
+5. **请求校验**：`type` 必须 ∈ {1..6}（对照 `threadpool.h` OP_TYPE），低级错误发出去之前拦截。
+
+**单元测试**（`agent/test_protocol.py`，12 个用例全过）：
+
+| 用例 | 覆盖点 |
+|---|---|
+| 帧布局 / 中文按字节计长 | 编码正确性，与独立构造的帧交叉验证 |
+| 半包碎块（1+3+5+剩余字节） | 凑帧循环 |
+| 两帧粘连一次到达 | 粘包拆分 + 第二次 request 不再 recv |
+| 帧尾残留下一帧半截头 | 跨请求缓冲复用 |
+| 长度 0 / 4097 | ProtocolError + 连接关闭 |
+| 非 JSON 正文 | ProtocolError + 连接关闭 |
+| 在途请求阻塞第二个请求 | 请求锁串行化（Event 控制响应时机，确定性断言） |
+| **真实 View 调用** | 连 WSL 服务端 6000，status=OK、arr 字段齐全（服务端未启动自动 skip） |
+
+**验收对照计划**：✅ 半包分两次到达、✅ 两包粘连、✅ 非法长度报错、✅ 真实调用 View 成功。
+
+---
+
