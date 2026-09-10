@@ -52,12 +52,20 @@ cd ~/ser-cli/server && ./ser        # 监听 127.0.0.1:6000
 pip install -r agent/requirements.txt
 export DEEPSEEK_API_KEY=sk-xxxx     # Windows CMD: set DEEPSEEK_API_KEY=...
 python -m agent.main --debug        # 登录后自然语言对话
+
+# 3) HTTP 服务层(Qt 桌面端 / 其他前端用, 见《Qt+Agent桌面端开发计划》):
+python -m agent.service --port 8000 # 默认对接 127.0.0.1:6000 的 C++ 服务端
+#   curl http://127.0.0.1:8000/health
+#   POST /login /register → {session_id, user_name};  GET /tickets?session_id=...
+#   POST /chat {session_id, text} → {reply, tool_trace, usage, confirm_request}
+#   POST /logout;  会话空闲 30 分钟自动清理; 缺 API Key 时登录/查票不受影响, /chat 返回 503 人话提示
 ```
 
 ## 测试与评测
 
 ```bash
-python -m unittest discover -s . -p "test_*.py"   # 35 个单元/集成测试(无需 API Key)
+python -m unittest discover -s . -p "test_*.py"   # 52 个单元/集成测试(无需 API Key)
+python -m unittest agent.test_service -v          # 服务层 17 用例(FastAPI TestClient)
 python -m agent.evaluate --smoke                  # 评测链路冒烟(真实服务端, 无需 Key)
 python -m agent.evaluate                          # 26 项任务真实评测(需 Key)
 python -m agent.evaluate --category 售罄改订      # 只跑一类
@@ -93,6 +101,8 @@ agent/
 ├── test_agent.py    M3/M4 测试: 12 用例(FakeLLM, 门控 A/B/C/D)
 ├── evaluate.py      M4 评测: 26 任务 / 判定 / 指标 / CLI 对照
 ├── main.py          M5 CLI 入口
+├── service.py       V1-M1 服务化层: FastAPI(/login /chat /tickets /logout + 会话TTL)
+├── test_service.py  V1-M1 测试: 17 用例(门控字段/503/多会话/TTL, 无需 Key)
 ├── scripts/reset_db.sh   评测前重置数据库
 └── eval_results/         评测明细 JSON
 ```

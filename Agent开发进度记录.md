@@ -210,3 +210,39 @@ CLI 多轮对话全流程实测通过：
 
 
 
+
+---
+
+## QtA V1-M1 FastAPI 服务层（2026-09-11，计划：《Qt+Agent桌面端开发计划》）
+
+**产出**：`agent/service.py`（服务层）+ `agent/test_service.py`（17 用例）+ `agent/agent.py` 小改（`AgentReply.confirm_request`）。
+
+**接口一览**（默认 `127.0.0.1:8000`，C++ 服务端地址可用 `--server-host/--server-port` 或 `TICKET_SERVER_HOST/PORT` 指定）：
+
+| 接口 | 作用 | 失败分级 |
+|---|---|---|
+| `POST /login` `/register` | 建 TicketSession（连 TCP+登录/注册并自动登录），返回 `{session_id, user_name}` | 401 密码错 / 409 手机号已注册 / 503 服务端不可达（提示先启动 WSL） |
+| `POST /chat` | 调 `TicketAgent.chat()`，返回 `{reply, tool_trace, usage, confirm_request, error}` | 404 会话不存在或过期 / 503 TCP 已断或缺 API Key |
+| `GET /tickets?session_id=` | 转发 `query_tickets`（桌面端表格数据源） | 404 / 503（network_error 归一） |
+| `POST /logout` | 关 TCP 并移除会话 | 404 |
+| `GET /health` | 存活探测（Qt 判断服务层是否启动） | — |
+
+**关键设计**：
+
+1. **会话管理**：`session_id(uuid) → {TicketSession, TicketAgent, Lock, last_active}`；空闲 **30 分钟 TTL**（后台协程周期清理 + 取用时惰性清理，清理即关 TCP 防连接泄漏）；同一会话的 chat/tickets 持锁串行化；logout 主动关闭。一个进程多会话并存（有测试）。
+2. **`confirm_request` 卡片数据**：`chat()` 结束后从 `_pending` 提取 `{action, args, display}`，**只在 pending 相对轮首变化时上报**——新建/改主意算新请求；用户口头拒绝后 pending 虽在但不重复弹卡；异常轮不上报。点击按钮=发送"确认"/"不订了"文本，门控零改动（完整模型链路）。
+3. **Agent 懒创建**：首次 `/chat` 才构造 TicketAgent——登录/查票不依赖 `DEEPSEEK_API_KEY`，缺 Key 只影响对话（503 人话），会话仍可用，Qt 端开发不烧 Key。
+4. **线程模型**：端点全部同步 def，Starlette 丢线程池执行，`agent.chat()` 最长 60s 的 LLM 调用不卡事件循环。
+5. **错误分级**：503（链路）/401/409（业务拒绝，用"连接是否仍在"区分）/404（会话）/422（参数）；chat 中工具网络故障不抛 503，与 CLI 一致由模型自然语言解释。
+
+**验收**：52/52 测试全过（原 35 无回归 + 新 17）；真实 C++ 服务端 curl 实测：register/login(401 分支)/tickets(真实余票)/logout(404 分支)/缺 Key 的 /chat 503 全部符合预期。**待补**：真实 Key 下 `/chat` 门控闭环 curl 实测（服务已启动后）：
+
+```bash
+export DEEPSEEK_API_KEY=sk-xxxx
+python -m agent.service --port 8000
+SID=$(curl -s -X POST localhost:8000/login -H "Content-Type: application/json" -d '{"tel":"...","passwd":"..."}' | python -c "import sys,json;print(json.load(sys.stdin)['session_id'])")
+curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"session_id":"$SID","text":"订10月1日去北京的"}"   # 应含 confirm_request
+curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"session_id":"$SID","text":"确认"}"               # confirm_request 应为 null, tool_trace ok=true
+```
+
+**下一步**：V1-M2 Qt 登录对接（LoginDialog 改走 `/login` `/register`，QNetworkAccessManager）。

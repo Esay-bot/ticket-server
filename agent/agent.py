@@ -128,6 +128,8 @@ class AgentReply:
     tool_trace: list = field(default_factory=list)   # [{name, args, ok, reason}]
     usage: dict = field(default_factory=dict)        # {"prompt_tokens", "completion_tokens", "total_tokens"}
     error: str | None = None                         # 非空表示本轮异常终止
+    # V1 服务化: 本轮"新产生"的待确认动作, 供界面渲染确认卡片(见 _new_confirm_request)
+    confirm_request: dict | None = None              # {"action", "args", "display"}
 
 
 class TicketAgent:
@@ -175,6 +177,7 @@ class TicketAgent:
         if self._pending is not None:
             self._user_turns_since_pending += 1
 
+        pending_before = self._pending
         reply = AgentReply(content="")
         try:
             reply = self._run_loop()
@@ -185,7 +188,22 @@ class TicketAgent:
             reply = AgentReply(content=f"抱歉, 调用模型出错: {e}", error=str(e))
         self.messages.append({"role": "assistant", "content": reply.content})
         self._trim_history()
+        if reply.error is None:
+            reply.confirm_request = self._new_confirm_request(pending_before)
         return reply
+
+    def _new_confirm_request(self, pending_before: dict | None) -> dict | None:
+        """提取本轮新产生的待确认动作, 作为界面确认卡片的数据。
+
+        只在 pending 相对轮首"变化"时上报: 新建/参数被覆盖(改主意)算新请求;
+        用户口头拒绝后 pending 虽仍在(门控状态不丢), 但不应每轮重复弹卡;
+        异常轮(error 非空)不上报 —— 模型没把复述文案转达出去, 弹卡只会误导。
+        """
+        pending = self._pending
+        if pending is None or pending == pending_before:
+            return None
+        return {"action": pending["tool"], "args": dict(pending["args"]),
+                "display": pending["display"]["confirm_display"]}
 
     def _trim_history(self) -> None:
         """M4 会话裁剪: 保留 system + 最近 max_history 条消息。
