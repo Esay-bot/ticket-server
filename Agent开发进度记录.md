@@ -56,3 +56,28 @@
 
 ---
 
+## Agent-M2 工具封装（提交：`Agent-M2`）
+
+**目标**：四个业务工具 + 结构化失败原因；登录态由会话持有，密码不进模型上下文。
+
+**完成内容**（`agent/tools.py`）：
+
+1. **`TicketSession`**：一条 TCP 连接 + 登录态（tel/user_name）。`login()/register()` 是 CLI 在进入 LLM 循环前的确定性步骤，密码永不出现在模型消息里；四个工具只做登录后业务。
+2. **四个工具**（docstring 即能力说明）：
+   - `query_tickets()` → `tickets:[{tk_id,addr,use_date,total,used,remaining}]`，服务端字符串字段统一转 int 并补算余票；
+   - `reserve_ticket(tk_id, confirmed)`：先查后做——前置判断售罄/无此票，成功返回 `remaining_after`；
+   - `my_reservations()` → `reservations:[{yd_id,addr,use_date}]`；
+   - `cancel_reservation(yd_id, confirmed)`：预查本人预约，把"别人的预约号"归因为 `not_yours`。
+3. **失败原因码固定**：`sold_out / ticket_not_found / not_yours / not_logged_in / server_rejected / network_error`，售罄时附 `alternatives`（有余票班次列表）供模型推荐替代。`confirmed` 参数为 M3 确认门控预留位。
+4. **服务端事实固化进注释**：余票扣减一致性由 C++ 事务保证（工具层不碰）；服务端不防重复预订；取消校验 yd_id+tel 双条件。
+
+**测试**（`agent/test_tools.py`，11 用例 + 真实服务端集成）：
+
+- 单元（假 socket 脚本化响应）：字符串→int 归一、售罄+替代列表、无此票、非本人预约号、未登录拦截、网络错误归因、成功帧字段；
+- 集成（真实服务端）：注册→登录→查票→订西安-北京→我的预约→取消→确认取消后列表为空；售罄班次（tk4）返回 `sold_out`；取消不存在预约号返回 `not_yours`。
+
+**验收对照计划**：✅ 四工具顺序调用全通；✅ 售罄票返回明确失败原因。
+
+---
+
+
