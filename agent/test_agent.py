@@ -173,6 +173,38 @@ class TestConfirmGate(unittest.TestCase):
         self.assertNotIn(b'"type":4', fake.sent)
 
 
+class TestHistoryTrim(unittest.TestCase):
+    def test_trims_at_user_boundary_keeps_system(self):
+        """多轮后裁剪: 保留 system, 总条数不超预算, 边界落在 user 上。"""
+        agent, _ = make_agent(
+            [], [("text", f"回复{i}") for i in range(5)])
+        agent.max_history = 6
+        for i in range(5):
+            agent.chat(f"第{i}轮")
+        roles = [m["role"] for m in agent.messages]
+        self.assertEqual(roles[0], "system")
+        self.assertLessEqual(len(roles), 6)
+        self.assertEqual(roles[1], "user")          # 裁剪点必须是 user 边界
+        self.assertEqual(roles, ["system", "user", "assistant",
+                                 "user", "assistant"])
+
+    def test_trim_never_orphans_tool_messages(self):
+        """裁剪不得把 assistant(tool_calls) 与其 tool 结果拆散。"""
+        agent, _ = make_agent(
+            [OK_QUERY(), OK_QUERY()],
+            [("tools", [("query_tickets", "{}")]), ("text", "清单如上。")])
+        agent.max_history = 8
+        agent.chat("查票")
+        agent.llm = FakeLLM([("text", "好的。"), ("text", "好的。")])
+        agent.chat("继续")
+        agent.chat("继续")
+        msgs = agent.messages
+        for idx, m in enumerate(msgs):
+            if m["role"] == "tool":
+                self.assertEqual(msgs[idx - 1]["role"], "assistant")
+                self.assertIn("tool_calls", msgs[idx - 1])
+
+
 class TestDefenses(unittest.TestCase):
     def test_max_steps_backstop(self):
         agent, _ = make_agent(

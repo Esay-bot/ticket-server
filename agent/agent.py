@@ -43,6 +43,7 @@ from agent.tools import (
 DEEPSEEK_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-chat"
 DEFAULT_MAX_STEPS = 8
+DEFAULT_MAX_HISTORY = 40   # M4: 多轮会话最多保留的消息条数(system 之外)
 LLM_TIMEOUT_SECONDS = 60
 
 # 暴露给 LLM 的工具 JSON Schema(Function Calling)
@@ -132,12 +133,14 @@ class TicketAgent:
     """
 
     def __init__(self, session: TicketSession, llm=None,
-                 model: str = DEFAULT_MODEL, max_steps: int = DEFAULT_MAX_STEPS):
+                 model: str = DEFAULT_MODEL, max_steps: int = DEFAULT_MAX_STEPS,
+                 max_history: int = DEFAULT_MAX_HISTORY):
         if llm is None:
             llm = self._make_llm()
         self.llm = llm
         self.model = model
         self.max_steps = max_steps
+        self.max_history = max_history
         self.session = session
         self.messages: list[dict] = [{
             "role": "system",
@@ -176,7 +179,24 @@ class TicketAgent:
         except Exception as e:  # openai.APIError 等一切异常: 道歉而非崩溃
             reply = AgentReply(content=f"抱歉, 调用模型出错: {e}", error=str(e))
         self.messages.append({"role": "assistant", "content": reply.content})
+        self._trim_history()
         return reply
+
+    def _trim_history(self) -> None:
+        """M4 会话裁剪: 保留 system + 最近 max_history 条消息。
+
+        只在 user 消息边界上裁剪 —— 一轮对话的 assistant(tool_calls)+tool*
+        消息组永远连续, 从 user 处下刀不会产生孤儿 tool 消息;
+        确认门控的 pending 状态在消息之外, 不受裁剪影响("必要状态")。
+        """
+        msgs = self.messages
+        if len(msgs) <= self.max_history:
+            return
+        # 从早到晚找第一个 user 边界, 使裁剪后长度进入预算(保留 system 占 1 条)
+        for i in range(1, len(msgs)):
+            if msgs[i]["role"] == "user" and len(msgs) - i + 1 <= self.max_history:
+                self.messages = [msgs[0]] + msgs[i:]
+                return
 
     # ---- 主循环 -----------------------------------------------------------
 
