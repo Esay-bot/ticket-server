@@ -32,3 +32,9 @@ _new_cpp.pdf
 学习Agent路线-提取.md
 王思雨-*-简历.html
 王思雨-*-简历.pdf
+
+# ===== Python / Agent =====
+__pycache__/
+*.pyc
+.env
+agent/eval_results/

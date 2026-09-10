@@ -35,8 +35,13 @@ CREATE TABLE IF NOT EXISTS reserve_ticket (
     KEY idx_tk (tk_id)
 ) ENGINE = InnoDB DEFAULT CHARSET = utf8mb4;
 
--- 种子数据: 3 条车票记录
+-- 种子数据: 4 条车票记录(Agent 评测场景)
+--   西安-北京: 充足    西安-上海: 充足
+--   西安-成都: 只剩 1 张(测"余票紧张"提示)
+--   西安-广州: 售罄(测"售罄追问/替代班次推荐")
+-- 重复导入前先 DROP DATABASE Project_DB (见 agent/scripts/reset_db.sh)
 INSERT INTO ticket_info (addr, `max`, num, use_date) VALUES
-    ('北京-上海', 100, 12, '2026-09-20'),
-    ('北京-广州',  80,  5, '2026-09-21'),
-    ('北京-成都',  60, 30, '2026-09-22');
+    ('西安-北京', 100,  0, '2026-10-01'),
+    ('西安-上海',  50,  0, '2026-10-02'),
+    ('西安-成都',  20, 19, '2026-10-03'),
+    ('西安-广州',  80, 80, '2026-10-04');
