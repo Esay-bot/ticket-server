@@ -80,4 +80,39 @@
 
 ---
 
+## Agent-M3 Agent 循环与确认门控（提交：`Agent-M3`）
+
+**目标**：手写 DeepSeek Function Calling 循环（不引框架）+ 代码层确认门控。计划称此模块为项目"灵魂"。
+
+**完成内容**（`agent/agent.py`，`TicketAgent` 类）：
+
+1. **消息列表 + 工具 schema + 执行回填**的经典循环：
+   `chat(用户输入)` → messages 追加 → `llm.chat.completions.create(model, messages, tools)` →
+   有 `tool_calls`：assistant 消息（含 tool_calls 结构）入栈 → 逐个执行 → 结果以 `role:"tool"` + `tool_call_id` 回填 → 继续下一轮；无 `tool_calls`：返回文本，本轮结束。
+2. **确认门控（代码层强制，回答面试自测题 4）**——服务端收到 type=4/6 即产生真实副作用，因此在"模型想调用"与"TCP 发包"之间加了三重闸门：
+   - 未带 `confirmed=true` 的 reserve/cancel：执行器**不碰 TCP**，查询详情记为 pending，返回 `confirm_required` + 复述文案（班次/日期/余票 或 预约号），由模型转达用户；
+   - `confirmed=true` 必须同时满足：**pending 存在且参数一致** 且 **pending 创建后用户又发过至少一条消息**（`_user_turns_since_pending` 计数）——模型无法在同一用户轮次内"自问自答"绕过门控；
+   - 新的危险调用参数与 pending 不一致 → 覆盖 pending（视为用户改主意）。
+   门控期即发现售罄/无此票/非本人预约 → 直接短路返回对应失败原因，不进确认流程。
+3. **系统提示词**：角色、当前用户（tel/user_name 注入，无密码）、能力边界（只做票务）、tk_id/yd_id 严禁编造、两步确认操作规范（a 不带 confirmed→b 复述等待→c 用户同意后 confirmed=true）、失败话术规则（sold_out→主动推荐 alternatives、not_yours→说明非本人）。
+4. **防御**：最大步数 8 防死循环（兜底话术）；LLM 60s 超时与一切 API 异常转自然语言道歉（`AgentReply.error` 记录）；未知工具/坏参数返回结构化错误让模型自行解释；token 用量累计进 `AgentReply.usage`。
+5. **可测性**：LLM 与 socket 均可注入——`FakeLLM`（脚本化模型响应）+ 假 socket 让整个循环离线可测，不需要 API Key。
+
+**测试**（`agent/test_agent.py`，10 用例全过）：
+
+| 用例 | 验证 |
+|---|---|
+| 纯文本应答 / 工具调用与回填 | 循环主干、消息序列 system→user→assistant→tool→assistant |
+| **A. 未确认不碰下单接口** | TCP 发送字节里无 `type:4` |
+| **B. 同轮自问自答被拒** | 两次 `confirm_required`，无下单帧 |
+| **C. 用户确认后下一轮放行** | `type:4` 帧出现且 pending 清空 |
+| **D. 改主意覆盖 pending** | 换班次后 pending 参数更新 |
+| 门控期售罄短路 | 返回 `sold_out` 不进确认流程 |
+| 最大步数兜底 / 未知工具 / LLM 异常 | 防御分支 |
+
+**验收对照计划**：循环/门控/防御的代码与测试完成；⚠️ 计划验收的"命令行多轮对话完成查票→订→确认"需真实 DeepSeek Key，待 M4/M5 阶段用真实模型补跑（`DEEPSEEK_API_KEY` 未设置）。
+
+---
+
+
 
