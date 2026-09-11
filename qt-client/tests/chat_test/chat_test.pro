@@ -1,10 +1,10 @@
-# V1-M2 数据链路测试(HTTP): 登录/表格填充/退出登录/断链提示
-# 前置: C++ 服务端 127.0.0.1:6000 已启动; 测试自行拉起 FastAPI 服务层(8906)
-# 运行: QT_QPA_PLATFORM=offscreen ./flow_test
+# V1-M3 验收测试: 聊天页签 + 确认卡片(渲染单测无 Key 可跑; 真实场景需 DEEPSEEK_API_KEY)
+# 前置: C++ 服务端 127.0.0.1:6000 已启动; 测试自行拉起 FastAPI 服务层(8908)
+# 运行: QT_QPA_PLATFORM=offscreen ./chat_test
 QT += core gui widgets network testlib
 CONFIG += c++14
 TEMPLATE = app
-TARGET   = flow_test
+TARGET   = chat_test
 
 INCLUDEPATH += ../../src
 

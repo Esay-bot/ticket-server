@@ -266,3 +266,23 @@ curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"sessi
 **踩坑记录**（写进测试注释）：① WSL 里连接被拒的 QNetworkReply finished 几乎同步到达，探活重试循环若只判"无信号"会瞬间耗尽——每轮间需 `QTest::qWait(500)` 留节拍；② Git Bash→WSL 内联命令的中文路径/引号会被转坏，复杂命令一律走脚本文件。
 
 **下一步**：V1-M3 聊天页签（消息列表+输入框+确认卡片+tool_trace 折叠）——核心场景 `查票→订票出卡→点确认→查我的预约→取消出卡→点确认` 的 GUI 验收测试。
+
+---
+
+## QtA V1-M3 聊天页签与确认卡片（2026-09-11，V1 功能闭环完成）
+
+**产出**：`qt-client/src/chatwidget.{h,cpp}`（新）+ MainWindow 接入"AI 助手"页签 + `tests/chat_test`（V1-M3 验收测试）。Qt 六套测试 + Python 53/53 全过。
+
+**功能**：
+
+1. **消息流**（QScrollArea + 自上而下布局）：欢迎语 / 用户消息 / 助手回复 / "正在思考(可能调用工具)..."占位；发送后输入禁用防连点。
+2. **确认卡片**（门控的产品化表达）：`confirm_request` 非空时渲染复述文案 + 按钮——预订卡 [确认预订][不订了]、取消卡 [确认取消][先不取消]；**点击=发送等价文本**（"确认"/"不订了"/"先不取消"）走完整模型链路，门控代码零改动；点过的按钮立即禁用；新一轮应答后旧卡片陈旧化（不复活）。
+3. **tool_trace 折叠行**：每轮回复下方灰色小字 `└ 工具: query_tickets(成功) · reserve_ticket(confirm_required)`（V2-M2 再面板化）。
+4. **对话后自动刷新**：每轮 chatFinished 触发 /tickets + /reservations，余票/预约随对话实时变化。
+
+**验收测试**（chat_test，自拉起服务层 8908 + 自注册账号）：
+- 无 Key 部分（始终跑，5 用例）：渲染/卡片按钮=等价文本（chatSent 信号断言）/旧卡片陈旧化——**全过**；
+- 有 Key 部分（`DEEPSEEK_API_KEY` 存在时跑，当前环境无 Key 故 SKIP）：GUI 完整走 `查票→订10月1日去北京的(出卡)→点[确认预订]→预约成立+表格联动→查我的预约→取消(出卡)→点[确认取消]→清空+余票复原`，及 `点[不订了]零预订`。**待用户 export Key 后复跑**（`cd qt-client/tests/chat_test/build && DEEPSEEK_API_KEY=... QT_QPA_PLATFORM=offscreen ./chat_test`）。
+- "断网重启服务后可重新登录继续"：flow_test 已覆盖 kill 服务层→提示先启动 + 退出登录→main.cpp 重登循环。
+
+**V1 完成状态对照计划**：FastAPI 服务层 ✓、确认卡片按钮化 ✓、门控可视化（轨迹行）✓——计划标注"不砍"的三项全部落地。下一步 V2-M1（服务层 SSE 流式 + chat_stream 事件生成器）→ V2-M2（三栏布局+打字机+轨迹面板）。

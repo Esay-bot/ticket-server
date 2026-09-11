@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "apiclient.h"
+#include "chatwidget.h"
 #include "logindialog.h"
 #include "tickettablemodel.h"
 #include "reservetablemodel.h"
@@ -18,6 +19,7 @@ MainWindow::MainWindow(const QUrl &apiBaseUrl, QWidget *parent)
       m_api(apiBaseUrl.isValid() && !apiBaseUrl.isEmpty()
                 ? new ApiClient(apiBaseUrl, this)
                 : new ApiClient(this)),
+      m_chat(new ChatWidget(m_api, this)),
       m_ticketModel(new TicketTableModel(this)),
       m_reserveModel(new ReserveTableModel(this))
 {
@@ -25,6 +27,13 @@ MainWindow::MainWindow(const QUrl &apiBaseUrl, QWidget *parent)
 
     connect(m_api, &ApiClient::ticketsFinished, this, &MainWindow::onTicketsFinished);
     connect(m_api, &ApiClient::reservationsFinished, this, &MainWindow::onReservationsFinished);
+    // 每轮对话结束后自动刷新两张表格: 余票/预约随对话实时变化(演示要点)
+    connect(m_api, &ApiClient::chatFinished, this, [this](bool ok) {
+        if (ok && m_api->hasSession()) {
+            refreshTickets();
+            refreshMyReserve();
+        }
+    });
 }
 
 MainWindow::~MainWindow()
@@ -55,6 +64,7 @@ void MainWindow::buildUi()
     m_reserveView = makeView(QStringLiteral("reserveView"), m_reserveModel);
 
     auto *tabs = new QTabWidget(this);
+    tabs->addTab(m_chat, QStringLiteral("AI 助手"));
     tabs->addTab(m_ticketView, QStringLiteral("车票列表"));
     tabs->addTab(m_reserveView, QStringLiteral("我的预约"));
 

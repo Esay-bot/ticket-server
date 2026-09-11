@@ -8,6 +8,7 @@
 #include "apiclient.h"
 
 class ApiClient;
+class ChatWidget;
 class TicketTableModel;
 class ReserveTableModel;
 class QTableView;
@@ -17,9 +18,11 @@ class QAbstractItemModel;
 /*
  * 主窗口(V1-M2 起数据源从直连 TCP 换成 Agent 服务层 HTTP)
  *
- * 布局: 页签[车票列表 / 我的预约] + 工具栏[刷新车票 / 刷新我的预约 / 退出登录]。
+ * 布局: 页签[AI 助手(聊天+确认卡片) / 车票列表 / 我的预约]
+ *       + 工具栏[刷新车票 / 刷新我的预约 / 退出登录]。
  * 手动"预约/取消"按钮已移除 —— 危险操作只能经对话(Agent 门控)发起,
  * 界面上不存在绕过门控的捷径, 这正是桌面端要"演"的核心。
+ * 每轮对话结束后自动刷新两张表格(余票/预约随对话实时变化)。
  *
  * 会话: session_id/tel/用户名由 ApiClient 持有; "退出登录"调 /logout
  * (服务层关 TCP)后带 reloginRequested 标记关窗, main.cpp 循环重新弹登录
@@ -46,6 +49,7 @@ public:
     bool reloginRequested() const { return m_reloginRequested; }
 
     ApiClient *api() const { return m_api; }
+    ChatWidget *chat() const { return m_chat; }
     QString userTel() const { return m_api->userTel(); }
     QString userName() const { return m_api->userName(); }
     TicketTableModel *ticketModel() const { return m_ticketModel; }
@@ -66,6 +70,7 @@ private:
     QTableView *makeView(const QString &name, QAbstractItemModel *model);
 
     ApiClient *m_api = nullptr;
+    ChatWidget *m_chat = nullptr;
     TicketTableModel *m_ticketModel = nullptr;
     ReserveTableModel *m_reserveModel = nullptr;
     QTableView *m_ticketView = nullptr;
