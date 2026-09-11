@@ -197,3 +197,45 @@ void ApiClient::sendChat(const QString &text)
                     emit chatFinished(ok, response, message);
                 });
 }
+
+void ApiClient::sendChatStream(const QString &text)
+{
+    // SSE: QNetworkReply 保持打开, readyRead 增量解析 "data: {json}" 帧;
+    // 事件在 UI 线程经 chatEvent 逐个送达(打字机), 无需轮询
+    QJsonObject body;
+    body.insert(QStringLiteral("session_id"), m_sessionId);
+    body.insert(QStringLiteral("text"), text);
+
+    QNetworkRequest req(endpoint(QStringLiteral("/chat/stream")));
+    req.setHeader(QNetworkRequest::ContentTypeHeader, QStringLiteral("application/json"));
+    req.setRawHeader(QByteArrayLiteral("Accept"), QByteArrayLiteral("text/event-stream"));
+
+    QNetworkReply *reply = m_nam->post(req, QJsonDocument(body).toJson(QJsonDocument::Compact));
+    ++m_pending;
+
+    auto *buffer = new QByteArray;         // 跨信号存续, finished 时删除
+    connect(reply, &QNetworkReply::readyRead, this, [this, reply, buffer]() {
+        buffer->append(reply->readAll());
+        int sep;
+        while ((sep = buffer->indexOf("\n\n")) >= 0) {
+            const QByteArray frame = buffer->left(sep);
+            buffer->remove(0, sep + 2);
+            for (const QByteArray &line : frame.split('\n')) {
+                if (line.startsWith("data: ")) {
+                    const QJsonDocument doc = QJsonDocument::fromJson(line.mid(6));
+                    if (doc.isObject())
+                        emit chatEvent(doc.object());
+                }
+            }
+        }
+    });
+    connect(reply, &QNetworkReply::finished, this, [this, reply, buffer]() {
+        --m_pending;
+        delete buffer;
+        // 正常结束: 最后的 done 事件已在 readyRead 送达; 只兜错误分支
+        const QString msg = errorMessage(reply);
+        if (!msg.isEmpty())
+            emit chatStreamFailed(msg);
+        reply->deleteLater();
+    });
+}

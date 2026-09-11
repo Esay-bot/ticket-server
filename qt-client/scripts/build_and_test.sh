@@ -5,7 +5,7 @@ set -u
 DIR="$(cd "$(dirname "$0")/.." && pwd)"     # qt-client/
 cd "$DIR"
 
-ALL="model_test codec_test net_test dialog_test flow_test"
+ALL="model_test codec_test net_test dialog_test flow_test chat_test"
 TESTS="${*:-$ALL}"
 
 for t in $TESTS; do

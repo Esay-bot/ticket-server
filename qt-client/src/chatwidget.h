@@ -37,6 +37,10 @@ public:
     // 渲染一轮 /chat 应答: 助手消息 + 工具轨迹行 + (可选)确认卡片
     void applyAssistantReply(const QJsonObject &body);
 
+    // V2-M2: 逐个消费 /chat/stream 的 SSE 事件(打字机渲染);
+    // token 增量拼接, done 收尾(异常覆盖已流出文本), confirm_request 出卡片
+    void onChatEvent(const QJsonObject &event);
+
     // 测试辅助: 消息流里最后一条指定 objectName 的 QLabel 文本
     QString lastLabelText(const QString &objectName) const;
     int messageCount() const;
@@ -58,6 +62,7 @@ private:
     void sendEquivalent(const QString &text);        // 卡片按钮的等价文本发送
     void setWaiting(bool on);                        // 等待应答: 禁输入
     void scrollToEnd();
+    QLabel *streamLabel();                           // 当前打字机消息(懒建)
 
     ApiClient *m_api = nullptr;
     QScrollArea *m_scroll = nullptr;
@@ -67,6 +72,7 @@ private:
     QPushButton *m_sendBtn = nullptr;
     QLabel *m_thinking = nullptr;          // "正在思考..."占位
     QWidget *m_card = nullptr;             // 当前存活的确认卡片(每轮移除)
+    QLabel *m_streaming = nullptr;         // V2-M2 打字机中的助手消息
     bool m_waiting = false;
 };
 

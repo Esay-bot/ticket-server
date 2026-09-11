@@ -4,10 +4,12 @@
 #include "logindialog.h"
 #include "tickettablemodel.h"
 #include "reservetablemodel.h"
+#include "tracepanel.h"
 
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QPushButton>
+#include <QSplitter>
 #include <QStatusBar>
 #include <QTabWidget>
 #include <QTableView>
@@ -20,6 +22,7 @@ MainWindow::MainWindow(const QUrl &apiBaseUrl, QWidget *parent)
                 ? new ApiClient(apiBaseUrl, this)
                 : new ApiClient(this)),
       m_chat(new ChatWidget(m_api, this)),
+      m_trace(new TracePanel(this)),
       m_ticketModel(new TicketTableModel(this)),
       m_reserveModel(new ReserveTableModel(this))
 {
@@ -34,6 +37,18 @@ MainWindow::MainWindow(const QUrl &apiBaseUrl, QWidget *parent)
             refreshMyReserve();
         }
     });
+    // V2-M2: 流式路径 —— SSE 事件分发到聊天流(打字机)与右栏轨迹面板;
+    // done 事件后同样自动刷新表格
+    connect(m_api, &ApiClient::chatEvent, m_chat, &ChatWidget::onChatEvent);
+    connect(m_api, &ApiClient::chatEvent, m_trace, &TracePanel::appendEvent);
+    connect(m_chat, &ChatWidget::chatSent, m_trace, &TracePanel::appendUserText);
+    connect(m_api, &ApiClient::chatEvent, this, [this](const QJsonObject &event) {
+        if (event.value(QStringLiteral("type")).toString() == QStringLiteral("done")
+            && m_api->hasSession()) {
+            refreshTickets();
+            refreshMyReserve();
+        }
+    });
 }
 
 MainWindow::~MainWindow()
@@ -43,7 +58,7 @@ MainWindow::~MainWindow()
 void MainWindow::buildUi()
 {
     setWindowTitle(QStringLiteral("票务预约系统"));
-    resize(900, 600);
+    resize(1200, 680);
 
     m_refreshBtn    = new QPushButton(QStringLiteral("刷新车票"), this);
     m_refreshBtn->setObjectName(QStringLiteral("refreshBtn"));
@@ -63,15 +78,26 @@ void MainWindow::buildUi()
     // 我的预约表
     m_reserveView = makeView(QStringLiteral("reserveView"), m_reserveModel);
 
-    auto *tabs = new QTabWidget(this);
-    tabs->addTab(m_chat, QStringLiteral("AI 助手"));
-    tabs->addTab(m_ticketView, QStringLiteral("车票列表"));
-    tabs->addTab(m_reserveView, QStringLiteral("我的预约"));
+    // V2-M2 三栏布局: 左(车票/我的预约页签) | 中(AI 助手聊天流) | 右(执行轨迹)
+    auto *leftTabs = new QTabWidget(this);
+    leftTabs->addTab(m_ticketView, QStringLiteral("车票列表"));
+    leftTabs->addTab(m_reserveView, QStringLiteral("我的预约"));
+    leftTabs->setMinimumWidth(280);
+
+    auto *splitter = new QSplitter(Qt::Horizontal, this);
+    splitter->setObjectName(QStringLiteral("mainSplitter"));
+    splitter->addWidget(leftTabs);
+    splitter->addWidget(m_chat);
+    splitter->addWidget(m_trace);
+    splitter->setStretchFactor(0, 2);
+    splitter->setStretchFactor(1, 3);
+    splitter->setStretchFactor(2, 2);
+    m_trace->setMinimumWidth(260);
 
     auto *central = new QWidget(this);
     auto *lay = new QVBoxLayout(central);
     lay->addLayout(btnRow);
-    lay->addWidget(tabs);
+    lay->addWidget(splitter);
     setCentralWidget(central);
 
     connect(m_refreshBtn, &QPushButton::clicked, this, &MainWindow::refreshTickets);

@@ -12,6 +12,7 @@ SOURCES += \
     src/mainwindow.cpp \
     src/apiclient.cpp \
     src/chatwidget.cpp \
+    src/tracepanel.cpp \
     src/logindialog.cpp \
     src/tickettablemodel.cpp \
     src/reservetablemodel.cpp
@@ -20,6 +21,7 @@ HEADERS += \
     src/mainwindow.h \
     src/apiclient.h \
     src/chatwidget.h \
+    src/tracepanel.h \
     src/logindialog.h \
     src/tickettablemodel.h \
     src/reservetablemodel.h \

@@ -41,6 +41,9 @@ public:
     void fetchTickets();                                             // GET /tickets
     void fetchReservations();                                        // GET /reservations
     void sendChat(const QString &text);                              // POST /chat
+    // V2-M2: SSE 流式对话(POST /chat/stream); 事件经 chatEvent 逐个送达,
+    // done 事件后流结束; 传输层/HTTP 错误走 chatStreamFailed
+    void sendChatStream(const QString &text);
 
     // ---- 状态 ----
     bool hasSession() const { return !m_sessionId.isEmpty(); }
@@ -59,6 +62,9 @@ signals:
                               const QString &message);
     // body: {reply, tool_trace, usage, confirm_request, error}(完整一轮对话)
     void chatFinished(bool ok, const QJsonObject &body, const QString &message);
+    // V2-M2: SSE 事件(token/tool_start/tool_result/confirm_request/done/error)
+    void chatEvent(const QJsonObject &event);
+    void chatStreamFailed(const QString &message);
 
 private:
     // 统一请求出口: 发 JSON 请求, 应答回到 UI 线程后按 HTTP 状态解析为 ok/message

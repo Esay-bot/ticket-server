@@ -9,6 +9,7 @@
 
 class ApiClient;
 class ChatWidget;
+class TracePanel;
 class TicketTableModel;
 class ReserveTableModel;
 class QTableView;
@@ -50,6 +51,7 @@ public:
 
     ApiClient *api() const { return m_api; }
     ChatWidget *chat() const { return m_chat; }
+    TracePanel *trace() const { return m_trace; }
     QString userTel() const { return m_api->userTel(); }
     QString userName() const { return m_api->userName(); }
     TicketTableModel *ticketModel() const { return m_ticketModel; }
@@ -71,6 +73,7 @@ private:
 
     ApiClient *m_api = nullptr;
     ChatWidget *m_chat = nullptr;
+    TracePanel *m_trace = nullptr;
     TicketTableModel *m_ticketModel = nullptr;
     ReserveTableModel *m_reserveModel = nullptr;
     QTableView *m_ticketView = nullptr;

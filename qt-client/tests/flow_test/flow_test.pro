@@ -11,6 +11,7 @@ INCLUDEPATH += ../../src
 SOURCES += main.cpp \
            ../../src/apiclient.cpp \
            ../../src/chatwidget.cpp \
+           ../../src/tracepanel.cpp \
            ../../src/logindialog.cpp \
            ../../src/mainwindow.cpp \
            ../../src/tickettablemodel.cpp \
@@ -18,6 +19,7 @@ SOURCES += main.cpp \
 
 HEADERS += ../../src/apiclient.h \
            ../../src/chatwidget.h \
+           ../../src/tracepanel.h \
            ../../src/logindialog.h \
            ../../src/mainwindow.h \
            ../../src/tickettablemodel.h \

@@ -303,3 +303,27 @@ curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"sessi
 **验收**：`chat_stream` 门控 A/C 用例在流式路径全过（未确认无下单帧→确认后下单）；SSE 事件序 token 拼接=done.content；SSE 冒烟脚本 `agent/scripts/sse_smoke.py`（真实服务端）。
 
 **待办**：V2-M2 Qt 三栏 + QNetworkReply 增量读 SSE 打字机 + 右栏执行轨迹面板。
+
+---
+
+## QtA V2-M2 Qt 三栏布局 + SSE 打字机 + 执行轨迹面板（2026-09-11）
+
+**产出**：`ApiClient::sendChatStream()`（readyRead 增量解析 SSE 帧 → `chatEvent` 信号逐事件送达 UI 线程）+ `ChatWidget::onChatEvent()`（token 拼接打字机，done 收尾/异常覆盖）+ 新增 `tracepanel.{h,cpp}`（右栏轨迹面板）+ MainWindow 三栏 QSplitter（左 车票/预约页签｜中 聊天流｜右 轨迹）。Qt 七套测试全绿（chat_test 增至 7+1skip），Python 59/59 无回退。
+
+**演示时右栏能看到**（V2-M2 验收）：
+
+```
+[你] 订10月1日去北京的
+▶ query_tickets({})
+✔ query_tickets 成功
+▶ reserve_ticket({"tk_id": 1})
+✖ reserve_ticket 门控拦截, 等待用户确认
+🟡 确认卡片: 预订班次 1: 西安-北京, 日期 2026-10-01, ...
+— 完成 (tokens: prompt 123 + completion 45)
+```
+
+（用户点[确认预订]后同一面板继续出现 `✔ reserve_ticket 成功`；表格余票随后自动变化。）
+
+**测试**：`streamEventsEndToEnd`（无 Key 也可跑）验证 Qt 侧 SSE 全链路——服务层以 error+done 事件收尾，readyRead 增量解析、事件分发到聊天流与轨迹面板、输入框恢复；`typewriterAndTracePanel` 直喂事件验证打字机拼接与面板逐行格式（含 门控拦截/token 计数）。真实 LLM 的打字机+轨迹全场景仍在 chat_test::fullScenarioWithRealLlm（待 Key 复跑）。
+
+**剩余**：V2-M3 演示录屏、V3 轻量美化（可推后）。

@@ -18,11 +18,13 @@
 #include "chatwidget.h"
 #include "tickettablemodel.h"
 #include "reservetablemodel.h"
+#include "tracepanel.h"
 
 #include <QJsonArray>
 #include <QJsonObject>
 #include <QLabel>
 #include <QLineEdit>
+#include <QPlainTextEdit>
 #include <QProcess>
 #include <QPushButton>
 #include <QRandomGenerator>
@@ -44,6 +46,8 @@ private slots:
     void renderReplyAndTrace();
     void cardButtonsSendEquivalentText();
     void staleCardRemovedOnNextReply();
+    void typewriterAndTracePanel();
+    void streamEventsEndToEnd();          // V2-M2: Qt 侧 SSE 解析(无 Key 也跑)
 
     void fullScenarioWithRealLlm();
 
@@ -222,6 +226,78 @@ void TestChat::staleCardRemovedOnNextReply()
     QVERIFY(liveCard(w) == nullptr);                        // 旧卡片已陈旧化
     QVERIFY(w.findChild<QWidget *>(QStringLiteral("confirmCardStale")) != nullptr);
     qDebug("[PASS] 新一轮应答后旧卡片陈旧化(用户已表态的卡片不复活)");
+}
+
+// ---- V2-M2: 打字机渲染 + 轨迹面板(直喂事件, 无需网络) -----------------------
+
+void TestChat::typewriterAndTracePanel()
+{
+    MainWindow w(kTestApi);
+    QVERIFY(login(w));
+    ChatWidget *chat = w.chat();
+    TracePanel *trace = w.trace();
+
+    chat->onChatEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("token") },
+                                    { QStringLiteral("text"), QStringLiteral("已查到, ") } }));
+    chat->onChatEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("token") },
+                                    { QStringLiteral("text"), QStringLiteral("共 4 班。") } }));
+    QCOMPARE(chat->lastLabelText(QStringLiteral("msgAssistant")),
+             QStringLiteral("助手：已查到, 共 4 班。"));            // 打字机拼接
+    chat->onChatEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("done") },
+                                    { QStringLiteral("content"),
+                                      QStringLiteral("已查到, 共 4 班。") },
+                                    { QStringLiteral("usage"), QJsonObject() },
+                                    { QStringLiteral("error"), QJsonValue() } }));
+
+    trace->appendUserText(QStringLiteral("订10月1日去北京的"));
+    trace->appendEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("tool_start") },
+                                     { QStringLiteral("name"), QStringLiteral("query_tickets") },
+                                     { QStringLiteral("args"), QStringLiteral("{}") } }));
+    trace->appendEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("tool_result") },
+                                     { QStringLiteral("name"), QStringLiteral("reserve_ticket") },
+                                     { QStringLiteral("ok"), false },
+                                     { QStringLiteral("reason"), QStringLiteral("confirm_required") } }));
+    trace->appendEvent(QJsonObject({ { QStringLiteral("type"), QStringLiteral("done") },
+                                     { QStringLiteral("usage"),
+                                       QJsonObject({ { QStringLiteral("prompt_tokens"), 120 },
+                                                     { QStringLiteral("completion_tokens"), 30 } }) } }));
+    const QString traceText =
+        w.findChild<QPlainTextEdit *>(QStringLiteral("traceView"))->toPlainText();
+    QVERIFY(traceText.contains(QStringLiteral("[你] 订10月1日去北京的")));
+    QVERIFY(traceText.contains(QStringLiteral("▶ query_tickets({})")));
+    QVERIFY(traceText.contains(
+        QStringLiteral("✖ reserve_ticket 门控拦截, 等待用户确认")));
+    QVERIFY(traceText.contains(QStringLiteral("tokens: prompt 120 + completion 30")));
+    qDebug("[PASS] 打字机拼接 + 轨迹面板: 工具/门控拦截/token 计数逐行可见");
+}
+
+void TestChat::streamEventsEndToEnd()
+{
+    // 无 Key 环境: 服务层以 error+done 两个 SSE 事件优雅收尾 ——
+    // 足以验证 Qt 侧 readyRead 增量解析与事件分发全链路
+    MainWindow w(kTestApi);
+    QVERIFY(login(w));
+    ChatWidget *chat = w.chat();
+    ApiClient *api = w.api();
+
+    QSignalSpy evSpy(api, &ApiClient::chatEvent);
+    chat->findChild<QLineEdit *>(QStringLiteral("chatInput"))
+        ->setText(QStringLiteral("有哪些票"));
+    QTest::mouseClick(chat->findChild<QPushButton *>(QStringLiteral("chatSendBtn")),
+                      Qt::LeftButton);
+    QVERIFY(evSpy.wait(30000));
+    QTRY_VERIFY_WITH_TIMEOUT(evSpy.count() >= 2, 10000);      // error + done
+    const QJsonObject first = evSpy.first().at(0).toJsonObject();
+    const QJsonObject last = evSpy.last().at(0).toJsonObject();
+    QCOMPARE(first.value(QStringLiteral("type")).toString(), QStringLiteral("error"));
+    QCOMPARE(last.value(QStringLiteral("type")).toString(), QStringLiteral("done"));
+    QTRY_VERIFY(chat->findChild<QLineEdit *>(QStringLiteral("chatInput"))->isEnabled());
+    // 轨迹面板同步收到事件(右栏可见 error 行)
+    const QString traceText =
+        w.findChild<QPlainTextEdit *>(QStringLiteral("traceView"))->toPlainText();
+    QVERIFY(traceText.contains(QStringLiteral("[你] 有哪些票")));
+    QVERIFY(traceText.contains(QStringLiteral("⚠")));
+    qDebug("[PASS] SSE 端到端: readyRead 增量解析 -> 事件分发到聊天流/轨迹面板");
 }
 
 // ---- 有 Key: 真实 LLM 全场景(计划 V1-M3 核心验收) ---------------------------

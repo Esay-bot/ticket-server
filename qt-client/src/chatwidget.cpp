@@ -44,6 +44,14 @@ ChatWidget::ChatWidget(ApiClient *api, QWidget *parent)
     connect(m_sendBtn, &QPushButton::clicked, this, &ChatWidget::sendMessage);
     connect(m_input, &QLineEdit::returnPressed, this, &ChatWidget::sendMessage);
     connect(m_api, &ApiClient::chatFinished, this, &ChatWidget::onChatFinished);
+    // V2-M2: 传输层/HTTP 层的流失败(服务层被停等), 与 done.error 分开处理
+    connect(m_api, &ApiClient::chatStreamFailed, this, [this](const QString &message) {
+        m_streaming = nullptr;
+        setWaiting(false);
+        addMessage(QStringLiteral("助手"),
+                   QStringLiteral("（请求失败）%1").arg(message),
+                   QStringLiteral("msgAssistant"));
+    });
 
     addMessage(QStringLiteral("助手"),
                QStringLiteral("你好，我是票务助手。可以帮你：查票、订票、查我的预约、取消预约。"
@@ -179,8 +187,53 @@ void ChatWidget::sendEquivalent(const QString &text)
         return;
     emit chatSent(text);
     addMessage(QStringLiteral("你"), text, QStringLiteral("msgUser"));
+    removeCard();                         // 用户已表态(文本或按钮): 旧卡片作废
     setWaiting(true);
-    m_api->sendChat(text);
+    m_api->sendChatStream(text);          // V2-M2: SSE 流式(打字机+轨迹面板)
+}
+
+// ---- V2-M2: SSE 事件消费(打字机) -------------------------------------------
+
+QLabel *ChatWidget::streamLabel()
+{
+    if (m_streaming == nullptr) {
+        m_streaming = new QLabel(m_holder);
+        m_streaming->setObjectName(QStringLiteral("msgAssistant"));
+        m_streaming->setWordWrap(true);
+        m_streaming->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        m_flow->insertWidget(m_flow->count() - 1, m_streaming);
+    }
+    return m_streaming;
+}
+
+void ChatWidget::onChatEvent(const QJsonObject &event)
+{
+    const QString type = event.value(QStringLiteral("type")).toString();
+    if (type == QStringLiteral("token")) {
+        QLabel *label = streamLabel();
+        const QString head = label->text().isEmpty()
+                                 ? QStringLiteral("助手：") : QString();
+        label->setText(label->text() + head
+                       + event.value(QStringLiteral("text")).toString());
+        scrollToEnd();
+    } else if (type == QStringLiteral("tool_start")) {
+        // 工具轮开始: 细节在右栏轨迹面板, 这里只留一行轻提示
+        if (m_thinking != nullptr)
+            m_thinking->setText(QStringLiteral("助手正在调用工具 %1 ...")
+                                    .arg(event.value(QStringLiteral("name")).toString()));
+    } else if (type == QStringLiteral("confirm_request")) {
+        showCard(event);
+    } else if (type == QStringLiteral("done")) {
+        const QString finalText =
+            event.value(QStringLiteral("content")).toString();
+        if (m_streaming != nullptr && !finalText.isEmpty()) {
+            // 异常轮: 用道歉话术覆盖已流出的部分 token; 正常轮文本一致
+            m_streaming->setText(QStringLiteral("助手：%1").arg(finalText));
+        }
+        m_streaming = nullptr;
+        setWaiting(false);
+        scrollToEnd();
+    }
 }
 
 void ChatWidget::setWaiting(bool on)
