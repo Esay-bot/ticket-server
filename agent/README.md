@@ -58,6 +58,7 @@ python -m agent.service --port 8000 # 默认对接 127.0.0.1:6000 的 C++ 服务
 #   curl http://127.0.0.1:8000/health
 #   POST /login /register → {session_id, user_name};  GET /tickets /reservations?session_id=...
 #   POST /chat {session_id, text} → {reply, tool_trace, usage, confirm_request}
+#   POST /chat/stream → SSE: token/tool_start/tool_result/confirm_request/done 事件
 #   POST /logout;  会话空闲 30 分钟自动清理; 缺 API Key 时登录/查票不受影响, /chat 返回 503 人话提示
 ```
 

@@ -18,6 +18,7 @@
 
 from __future__ import annotations
 
+import json
 import time
 import unittest
 from types import SimpleNamespace
@@ -254,6 +255,79 @@ class TestChatAndGate(unittest.TestCase):
             # 乙的会话里没有甲的消息
             self.assertNotIn("甲", "".join(m.get("content", "")
                                            for m in recs[1].swap.inner.calls[0]["messages"]))
+
+
+class TestChatStream(unittest.TestCase):
+    """V2-M1: POST /chat/stream 的 SSE 输出(事件序与 chat_stream() 一一对应)。"""
+
+    def _login(self, tc):
+        r = tc.post("/login", json={"tel": "13900000001", "passwd": "x"})
+        self.assertEqual(r.status_code, 200, r.text)
+        return r.json()["session_id"]
+
+    def _stream_events(self, tc, sid, text):
+        events = []
+        with tc.stream("POST", "/chat/stream",
+                       json={"session_id": sid, "text": text}) as r:
+            self.assertEqual(r.status_code, 200)
+            self.assertTrue(r.headers["content-type"].startswith("text/event-stream"))
+            for line in r.iter_lines():
+                if line.startswith("data: "):
+                    events.append(json.loads(line[len("data: "):]))
+        return events
+
+    def test_gate_flow_over_sse(self):
+        # 帧: 登录 | 门控查票 | 确认执行(查票+下单)
+        tc, recs = make_service(
+            [[OK_LOGIN(), OK_QUERY(), OK_QUERY(), OK_RESERVE()]])
+        with tc:
+            sid = self._login(tc)
+            recs[0].swap.load([("tools", [("reserve_ticket", '{"tk_id": 1}')]),
+                               ("text", "确认预订吗?")])
+            evs = self._stream_events(tc, sid, "订1号")
+            kinds = [e["type"] for e in evs]
+            self.assertEqual(kinds[0], "tool_start")
+            self.assertIn("tool_result", kinds)
+            tr = next(e for e in evs if e["type"] == "tool_result")
+            self.assertEqual(tr["reason"], "confirm_required")
+            self.assertIn("confirm_request", kinds)
+            self.assertEqual(kinds[-1], "done")
+            self.assertEqual("".join(e["text"] for e in evs if e["type"] == "token"),
+                             "确认预订吗?")
+            self.assertNotIn(b'"type":4', recs[0].sock.sent)   # 未确认不下单
+
+            recs[0].swap.load([("tools", [("reserve_ticket",
+                                           '{"tk_id": 1, "confirmed": true}')]),
+                               ("text", "预订成功!")])
+            evs2 = self._stream_events(tc, sid, "确认")
+            self.assertTrue(next(e for e in evs2 if e["type"] == "tool_result")["ok"])
+            self.assertIn(b'"type":4', recs[0].sock.sent)      # 此刻才下单
+            self.assertNotIn("confirm_request", [e["type"] for e in evs2])
+
+    def test_stream_unknown_session_404(self):
+        with TestClient(create_app(connect=_raise_transport)) as tc:
+            with tc.stream("POST", "/chat/stream",
+                           json={"session_id": "nope", "text": "hi"}) as r:
+                self.assertEqual(r.status_code, 404)
+
+    def test_stream_without_llm_key_ends_with_error_events(self):
+        """缺 Key: 以 error + done 事件优雅收尾, 而非挂死或半截 HTML。"""
+        def connect() -> TicketClient:
+            client = TicketClient()
+            client.connect(sock=FakeSocket([OK_LOGIN()]))
+            return client
+
+        def no_key_factory(session):
+            raise RuntimeError("未设置环境变量 DEEPSEEK_API_KEY, 无法调用 DeepSeek")
+
+        with TestClient(create_app(connect=connect,
+                                   agent_factory=no_key_factory)) as tc:
+            sid = self._login(tc)
+            evs = self._stream_events(tc, sid, "查票")
+            self.assertEqual(evs[0]["type"], "error")
+            self.assertIn("DEEPSEEK_API_KEY", evs[0]["message"])
+            self.assertEqual(evs[-1]["type"], "done")
+            self.assertIsNotNone(evs[-1]["error"])
 
 
 class TestTicketsAndLogout(unittest.TestCase):

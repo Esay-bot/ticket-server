@@ -205,6 +205,112 @@ class TicketAgent:
         return {"action": pending["tool"], "args": dict(pending["args"]),
                 "display": pending["display"]["confirm_display"]}
 
+    # ---- 对外主入口(流式, V2-M1) -------------------------------------------
+
+    def chat_stream(self, user_text: str):
+        """chat() 的流式版本: 生成事件 dict, 供服务层转 SSE。
+
+        事件类型:
+          {"type": "token", "text"}                       正文增量(打字机)
+          {"type": "tool_start", "name", "args"}          模型请求调用工具
+          {"type": "tool_result", "name", "ok", "reason"} 工具执行结果(含门控拦截)
+          {"type": "confirm_request", "action", "args", "display"}  确认卡片(新 pending)
+          {"type": "done", "content", "usage", "error"}   一轮结束(content 为最终文本)
+
+        与 chat() 共享同一套 messages/门控/裁剪 —— 只有输出形态不同,
+        因此 CLI(chat) 与既有测试零改动; done.content 供客户端在异常时
+        用道歉话术覆盖已流出的部分 token。
+        """
+        self.messages.append({"role": "user", "content": user_text})
+        if self._pending is not None:
+            self._user_turns_since_pending += 1
+
+        pending_before = self._pending
+        usage_total = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+        content, error = "", None
+        try:
+            exhausted = True
+            for _ in range(self.max_steps):
+                content, tool_calls = yield from self._stream_llm_round(usage_total)
+                if not tool_calls:
+                    exhausted = False
+                    break
+                self.messages.append({
+                    "role": "assistant",
+                    "content": content or "",
+                    "tool_calls": [{"id": tc["id"], "type": "function",
+                                    "function": {"name": tc["name"],
+                                                 "arguments": tc["arguments"]}}
+                                   for tc in tool_calls],
+                })
+                for tc in tool_calls:
+                    yield {"type": "tool_start", "name": tc["name"],
+                           "args": tc["arguments"]}
+                    result, trace = self._dispatch(tc["name"], tc["arguments"])
+                    yield {"type": "tool_result", "name": trace["name"],
+                           "ok": trace["ok"], "reason": trace["reason"]}
+                    self.messages.append({
+                        "role": "tool", "tool_call_id": tc["id"],
+                        "content": json.dumps(result, ensure_ascii=False),
+                    })
+            if exhausted:                 # 步数用尽仍没给出文本: 兜底话术
+                content = "抱歉, 这个请求的处理步骤过多, 请换个说法或稍后再试。"
+                error = "max_steps_exceeded"
+        except TimeoutError:
+            content = "抱歉, 模型响应超时了, 请稍后再试一次。"
+            error = "llm_timeout"
+        except Exception as e:             # 与 chat() 一致: 道歉而非崩溃
+            content = f"抱歉, 调用模型出错: {e}"
+            error = str(e)
+
+        self.messages.append({"role": "assistant", "content": content})
+        self._trim_history()
+        if error is None:
+            cr = self._new_confirm_request(pending_before)
+            if cr is not None:
+                yield {"type": "confirm_request", **cr}
+        yield {"type": "done", "content": content, "usage": usage_total, "error": error}
+
+    def _stream_llm_round(self, usage_total: dict):
+        """一次流式 LLM 调用: 逐块 yield token 事件; 返回 (本轮文本, tool_calls)。
+
+        DeepSeek 流式工具调用按 OpenAI 形态分片到达(delta.tool_calls),
+        需按 index 累积 id/name/arguments; usage 在含 stream_options 的
+        末块(chunk.choices 为空)上给出。
+        """
+        stream = self.llm.chat.completions.create(
+            model=self.model, messages=self.messages,
+            tools=TOOLS_SCHEMA, stream=True,
+            stream_options={"include_usage": True},
+        )
+        parts: list[str] = []
+        acc: dict[int, dict] = {}
+        for chunk in stream:
+            usage = getattr(chunk, "usage", None)
+            if usage is not None:
+                for k in usage_total:
+                    usage_total[k] += getattr(usage, k, 0) or 0
+            choices = getattr(chunk, "choices", None)
+            if not choices:
+                continue                   # 仅携带 usage 的末块
+            delta = choices[0].delta
+            text = getattr(delta, "content", None)
+            if text:
+                parts.append(text)
+                yield {"type": "token", "text": text}
+            for tc in getattr(delta, "tool_calls", None) or []:
+                slot = acc.setdefault(tc.index, {"id": "", "name": "", "arguments": ""})
+                if getattr(tc, "id", None):
+                    slot["id"] = tc.id
+                fn = getattr(tc, "function", None)
+                if fn is not None:
+                    if getattr(fn, "name", None):
+                        slot["name"] = fn.name
+                    if getattr(fn, "arguments", None):
+                        slot["arguments"] += fn.arguments
+        tool_calls = [acc[i] for i in sorted(acc)] if acc else None
+        return "".join(parts), tool_calls
+
     def _trim_history(self) -> None:
         """M4 会话裁剪: 保留 system + 最近 max_history 条消息。
 

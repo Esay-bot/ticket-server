@@ -286,3 +286,20 @@ curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"sessi
 - "断网重启服务后可重新登录继续"：flow_test 已覆盖 kill 服务层→提示先启动 + 退出登录→main.cpp 重登循环。
 
 **V1 完成状态对照计划**：FastAPI 服务层 ✓、确认卡片按钮化 ✓、门控可视化（轨迹行）✓——计划标注"不砍"的三项全部落地。下一步 V2-M1（服务层 SSE 流式 + chat_stream 事件生成器）→ V2-M2（三栏布局+打字机+轨迹面板）。
+
+---
+
+## QtA V2-M1 服务层流式 SSE（2026-09-11）
+
+**产出**：`agent.py` 新增 `chat_stream()` 事件生成器 + `service.py` 新增 `POST /chat/stream`(SSE) + FakeLLM 流式形态。Python 59/59 全过（新增 agent 流式 3 用例 + 服务 SSE 3 用例）。
+
+**设计**：
+
+1. **`chat_stream(user_text)`**：与 `chat()` 共享同一套 messages/门控/裁剪——只有输出形态不同。事件：`token`(打字机增量) / `tool_start`(名称+参数) / `tool_result`(名称+ok+reason，门控拦截即 `confirm_required`) / `confirm_request`(卡片) / `done`(最终 content+usage+error，异常时供客户端覆盖已流出 token)。
+2. **流式工具调用累积**：DeepSeek 按 OpenAI 形态分片吐 `delta.tool_calls`，按 index 累积 id/name/arguments；usage 在 `stream_options={"include_usage": True}` 的末块(choices 为空)给出。
+3. **`POST /chat/stream`**：`StreamingResponse(media_type="text/event-stream")`，同步生成器由 Starlette 丢线程池迭代，token 渐产不卡事件循环；缺 Key 时以 `error`+`done` 事件优雅收尾（SSE 冒烟实测）。
+4. **零回退**：`chat()` 与既有测试一行未动；FakeLLM 只在 `stream=True` 时走分片形态（test_agent 15 用例含非流式 12 个原样全过）。
+
+**验收**：`chat_stream` 门控 A/C 用例在流式路径全过（未确认无下单帧→确认后下单）；SSE 事件序 token 拼接=done.content；SSE 冒烟脚本 `agent/scripts/sse_smoke.py`（真实服务端）。
+
+**待办**：V2-M2 Qt 三栏 + QNetworkReply 增量读 SSE 打字机 + 右栏执行轨迹面板。

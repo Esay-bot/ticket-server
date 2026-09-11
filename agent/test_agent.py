@@ -56,15 +56,47 @@ class FakeLLM:
         if self.raise_exc:
             raise self.raise_exc
         kind, payload = self.script.pop(0)
+        if kw.get("stream"):               # V2-M1: chat_stream() 的流式形态
+            return self._fake_stream(kind, payload)
         if kind == "text":
             msg = SimpleNamespace(content=payload, tool_calls=None)
         else:
-            tcs = [SimpleNamespace(id=f"call_{i}",
-                                   function=SimpleNamespace(name=name, arguments=args))
-                   for i, (name, args) in enumerate(payload)]
+            tcs = self._tool_call_namespaces(payload)
             msg = SimpleNamespace(content=None, tool_calls=tcs)
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=5, total_tokens=15)
         return SimpleNamespace(choices=[SimpleNamespace(message=msg)], usage=usage)
+
+    @staticmethod
+    def _tool_call_namespaces(payload):
+        return [SimpleNamespace(id=f"call_{i}",
+                                function=SimpleNamespace(name=name, arguments=args))
+                for i, (name, args) in enumerate(payload)]
+
+    @staticmethod
+    def _fake_stream(kind, payload):
+        """按 OpenAI 流式分片形态吐 chunk: 文本按 5 字符切片;
+        工具调用首块带 index/id/name, 参数按 8 字符分片续传; 末块只带 usage。"""
+        chunks = []
+        if kind == "text":
+            for i in range(0, len(payload), 5):
+                chunks.append(SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=payload[i:i + 5], tool_calls=None))]))
+        else:
+            for idx, (name, args) in enumerate(payload):
+                chunks.append(SimpleNamespace(choices=[SimpleNamespace(
+                    delta=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(
+                        index=idx, id=f"call_{idx}",
+                        function=SimpleNamespace(name=name, arguments=""))]))]))
+                for j in range(0, len(args), 8):
+                    chunks.append(SimpleNamespace(choices=[SimpleNamespace(
+                        delta=SimpleNamespace(content=None, tool_calls=[SimpleNamespace(
+                            index=idx, id=None,
+                            function=SimpleNamespace(name=None, arguments=args[j:j + 8]))]))]))
+        chunks.append(SimpleNamespace(choices=[],
+                                      usage=SimpleNamespace(prompt_tokens=10,
+                                                            completion_tokens=5,
+                                                            total_tokens=15)))
+        return chunks
 
 
 def make_agent(responses, script=None, raise_exc=None):
@@ -171,6 +203,67 @@ class TestConfirmGate(unittest.TestCase):
         self.assertEqual(r.tool_trace[0]["reason"], "sold_out")
         self.assertIsNone(agent._pending)
         self.assertNotIn(b'"type":4', fake.sent)
+
+
+class TestChatStream(unittest.TestCase):
+    """V2-M1: chat_stream() 与 chat() 共享 messages/门控, 只有输出形态不同。"""
+
+    @staticmethod
+    def events_of(agent, text):
+        return list(agent.chat_stream(text))
+
+    def test_tokens_concat_to_final_content(self):
+        agent, _ = make_agent([], [("text", "共 4 个班次, 欢迎挑选。")])
+        evs = self.events_of(agent, "有哪些票")
+        tokens = [e["text"] for e in evs if e["type"] == "token"]
+        done = evs[-1]
+        self.assertEqual(done["type"], "done")
+        self.assertIsNone(done["error"])
+        self.assertEqual("".join(tokens), done["content"])
+        self.assertEqual(done["content"], "共 4 个班次, 欢迎挑选。")
+        self.assertEqual(done["usage"]["total_tokens"], 15)
+        # messages 维护与 chat() 同构
+        self.assertEqual([m["role"] for m in agent.messages],
+                         ["system", "user", "assistant"])
+
+    def test_gate_flow_streaming(self):
+        """门控两步操作在流式路径同样全过: 未确认拦截 -> 确认后放行。"""
+        agent, fake = make_agent(
+            [OK_QUERY(), OK_QUERY(), OK_RESERVE()],
+            [("tools", [("reserve_ticket", '{"tk_id": 1}')]),
+             ("text", "西安-北京 2026-10-01, 确认预订吗?")])
+        evs = self.events_of(agent, "订1号")
+        kinds = [e["type"] for e in evs]
+        self.assertIn("tool_start", kinds)
+        tr = next(e for e in evs if e["type"] == "tool_result")
+        self.assertEqual((tr["name"], tr["ok"], tr["reason"]),
+                         ("reserve_ticket", False, "confirm_required"))
+        cr = next(e for e in evs if e["type"] == "confirm_request")
+        self.assertEqual(cr["action"], "reserve_ticket")
+        self.assertIn("预订班次 1", cr["display"])
+        self.assertNotIn(b'"type":4', fake.sent)      # 未确认不下单
+
+        agent.llm = FakeLLM([("tools", [("reserve_ticket",
+                                         '{"tk_id": 1, "confirmed": true}')]),
+                             ("text", "预订成功!")])
+        evs2 = self.events_of(agent, "确认")
+        tr2 = next(e for e in evs2 if e["type"] == "tool_result")
+        self.assertTrue(tr2["ok"])
+        self.assertIn(b'"type":4', fake.sent)          # 此刻才下单
+        self.assertNotIn("confirm_request", [e["type"] for e in evs2])
+        # 工具轮的历史结构与非流式一致: assistant(tool_calls)+tool 回填
+        self.assertEqual([m["role"] for m in agent.messages],
+                         ["system", "user", "assistant", "tool", "assistant",
+                          "user", "assistant", "tool", "assistant"])
+
+    def test_stream_error_apologizes(self):
+        agent, _ = make_agent([], raise_exc=RuntimeError("api down"))
+        evs = self.events_of(agent, "查票")
+        done = evs[-1]
+        self.assertEqual(done["error"], "api down")
+        self.assertIn("抱歉", done["content"])
+        # 异常轮不上报确认卡片
+        self.assertNotIn("confirm_request", [e["type"] for e in evs])
 
 
 class TestHistoryTrim(unittest.TestCase):

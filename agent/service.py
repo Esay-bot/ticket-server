@@ -35,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import threading
 import time
@@ -45,6 +46,7 @@ from typing import Callable
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from agent.agent import TicketAgent
@@ -67,6 +69,11 @@ class _Entry:
     agent: TicketAgent | None = None      # 懒创建: 首次 /chat 时构造, 登录不依赖 LLM Key
     lock: threading.Lock = field(default_factory=threading.Lock)
     last_active: float = field(default_factory=time.monotonic)
+
+
+def _sse(event: dict) -> str:
+    """dict -> 一条 SSE 帧(data: JSON\\n\\n)。"""
+    return f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
 
 def _close_quietly(session: TicketSession) -> None:
@@ -264,6 +271,37 @@ def create_app(*, server_host: str | None = None, server_port: int | None = None
                 "usage": reply.usage,
                 "confirm_request": reply.confirm_request,
                 "error": reply.error}
+
+    @app.post("/chat/stream")
+    def chat_stream(body: ChatIn, request: Request):
+        """V2-M1: SSE 流式对话(text/event-stream), 事件与 chat_stream() 一一对应。
+
+        每个事件一行 JSON: data: {"type": "token"|"tool_start"|"tool_result"|
+        "confirm_request"|"done", ...}\n\n; Starlette 把同步生成器丢线程池
+        迭代, 慢慢产出的 token 不会卡事件循环。
+        """
+        entry = store.get(body.session_id)
+        if entry is None:
+            raise HTTPException(404, "会话不存在或已过期, 请重新登录")
+        if not entry.session.client.connected:
+            raise HTTPException(503, "与票务服务端的连接已断开, 请重新登录")
+
+        def sse_events():
+            with entry.lock:
+                if entry.agent is None:
+                    try:
+                        entry.agent = request.app.state.agent_factory(entry.session)
+                    except RuntimeError as e:      # 缺 Key 等: 以 error 事件优雅收尾
+                        yield _sse({"type": "error", "message": f"Agent 初始化失败: {e}"})
+                        yield _sse({"type": "done", "content": "", "usage": {},
+                                    "error": str(e)})
+                        return
+                for event in entry.agent.chat_stream(body.text):
+                    yield _sse(event)
+
+        return StreamingResponse(sse_events(), media_type="text/event-stream",
+                                 headers={"Cache-Control": "no-cache",
+                                          "X-Accel-Buffering": "no"})
 
     @app.get("/tickets")
     def tickets(session_id: str, request: Request):
