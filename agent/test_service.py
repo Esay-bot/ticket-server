@@ -44,6 +44,12 @@ def OK_RESERVE():
     return frame_of({"status": "OK"})
 
 
+def OK_MINE():
+    return frame_of({"status": "OK", "arr": [
+        {"yd_id": "7", "addr": "西安-北京", "use_date": "2026-10-01"},
+        {"yd_id": "9", "addr": "西安-上海", "use_date": "2026-10-02"}]})
+
+
 class SwapLLM:
     """http 调用之间可整体换剧本的 LLM 桩(每次 POST /chat 前 load 下一轮)。"""
 
@@ -266,6 +272,18 @@ class TestTicketsAndLogout(unittest.TestCase):
         self.assertTrue(body["ok"])
         t3 = body["tickets"][2]                    # SEED 3 号: 20-19=1
         self.assertEqual((t3["tk_id"], t3["remaining"]), (3, 1))
+
+    def test_reservations_forwarding(self):
+        """服务端 yd_id 为字符串, /reservations 应转成 int 并按号排序。"""
+        tc, _ = make_service([[OK_LOGIN(), OK_MINE()]])
+        with tc:
+            sid = self._login(tc)
+            r = tc.get("/reservations", params={"session_id": sid})
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertTrue(body["ok"])
+        self.assertEqual([x["yd_id"] for x in body["reservations"]], [7, 9])
+        self.assertEqual(body["reservations"][0]["addr"], "西安-北京")
 
     def test_tickets_network_error_maps_503(self):
         tc, recs = make_service([[OK_LOGIN()]])

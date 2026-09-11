@@ -246,3 +246,23 @@ curl -X POST localhost:8000/chat -H "Content-Type: application/json" -d "{"sessi
 ```
 
 **下一步**：V1-M2 Qt 登录对接（LoginDialog 改走 `/login` `/register`，QNetworkAccessManager）。
+
+---
+
+## QtA V1-M2 Qt 登录对接 HTTP（2026-09-11）
+
+**产出**：`qt-client/src/apiclient.{h,cpp}`（新）+ `LoginDialog`/`MainWindow`/`main.cpp` 改造 + 服务层补 `GET /reservations` + 五个测试全部翻新。服务层 Python 测试 18/18（新增 /reservations 转发用例）。
+
+**改动要点**：
+
+1. **`ApiClient`**（QNetworkAccessManager 封装）：login/register/tickets/reservations/chat/logout/health 全异步，信号回 UI 线程；持有 session_id/userName/userTel。**错误人话化两级**：无 HTTP 状态（服务层未启动）→ "无法连接 Agent 服务，请先启动： python -m agent.service"；4xx/5xx → 直接展示服务层 `{"detail": 人话}`（401 密码错/409 已注册/404 会话过期/422 校验错）。
+2. **`LoginDialog`**：showEvent 先 `/health` 探活（验收：服务层未启动直接提示启动命令）；提交改调 `/login` `/register`（注册成功自动登录，服务层已内置）；等待态防连点保留。
+3. **`MainWindow`**：数据源从直连 TCP 换 `GET /tickets` `GET /reservations`（Model 加 `fromHttpArray` 适配器复用）；**手动"预约/取消"按钮移除**——危险操作只能经对话+门控发起，界面无绕过门控的捷径；新增"退出登录"（/logout → 关窗 → main.cpp 循环重登，覆盖"断网重启服务后重新登录"验收）。
+4. **测试翻新**（全部改为自注册随机账号，不再依赖被评测清库重置的种子账号 13800001111）：dialog_test 9 用例（HTTP 形态，自拉起服务层 8901）；flow_test 4 用例（登录→表格链路→退出→kill 服务层提示）；model_test 8 用例（纯单测 + fromHttpArray）；net_test（TCP 直连形态保留，自注册账号）；codec_test 不变。**WSL 一键跑**：`bash qt-client/scripts/build_and_test.sh`。
+5. **运维**：WSL Python(3.14) 补装 pip(get-pip.py) + fastapi/uvicorn/httpx（`--user --break-system-packages`），服务层现可在 Windows 或 WSL 任一侧启动；`agent/scripts/wsl_smoke.sh` 冒烟脚本。
+
+**验收**（真实 C++ 服务端 + WSL 服务层）：错误密码 401 人话提示 ✓；服务层未启动提示"请先启动 python -m agent.service" ✓（dialog_test::serviceDownShowsStartupHint + flow_test::serviceKilledShowsStartupHint）。
+
+**踩坑记录**（写进测试注释）：① WSL 里连接被拒的 QNetworkReply finished 几乎同步到达，探活重试循环若只判"无信号"会瞬间耗尽——每轮间需 `QTest::qWait(500)` 留节拍；② Git Bash→WSL 内联命令的中文路径/引号会被转坏，复杂命令一律走脚本文件。
+
+**下一步**：V1-M3 聊天页签（消息列表+输入框+确认卡片+tool_trace 折叠）——核心场景 `查票→订票出卡→点确认→查我的预约→取消出卡→点确认` 的 GUI 验收测试。

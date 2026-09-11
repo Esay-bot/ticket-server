@@ -4,6 +4,7 @@
   - POST /login /register: 建 TicketSession(连 TCP、注册/登录), 返回 session_id;
   - POST /chat:            调 TicketAgent.chat(), 返回 reply/tool_trace/usage/confirm_request;
   - GET  /tickets:         转发 query_tickets(桌面端表格的数据源);
+  - GET  /reservations:    转发 my_reservations(桌面端"我的预约"页签);
   - POST /logout:          主动关闭 TCP 并移除会话;
   - GET  /health:          存活探测(界面判断"服务层是否已启动")。
 
@@ -48,7 +49,7 @@ from pydantic import BaseModel, Field
 
 from agent.agent import TicketAgent
 from agent.protocol import TicketClient, TransportError
-from agent.tools import REASON_NETWORK, TicketSession, query_tickets
+from agent.tools import REASON_NETWORK, TicketSession, my_reservations, query_tickets
 
 DEFAULT_HTTP_HOST = "127.0.0.1"
 DEFAULT_HTTP_PORT = 8000
@@ -271,6 +272,18 @@ def create_app(*, server_host: str | None = None, server_port: int | None = None
             raise HTTPException(404, "会话不存在或已过期, 请重新登录")
         with entry.lock:
             out = query_tickets(entry.session)
+        if not out.get("ok") and out.get("reason") == REASON_NETWORK:
+            raise HTTPException(503, out.get("message") or _net_msg(request.app.state))
+        return out
+
+    @app.get("/reservations")
+    def reservations(session_id: str, request: Request):
+        """我的预约(桌面端"我的预约"页签数据源; 转发 my_reservations)。"""
+        entry = store.get(session_id)
+        if entry is None:
+            raise HTTPException(404, "会话不存在或已过期, 请重新登录")
+        with entry.lock:
+            out = my_reservations(entry.session)
         if not out.get("ok") and out.get("reason") == REASON_NETWORK:
             raise HTTPException(503, out.get("message") or _net_msg(request.app.state))
         return out

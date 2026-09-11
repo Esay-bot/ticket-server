@@ -66,6 +66,23 @@ Reservation ReserveTableModel::reservationAt(int row) const
     return (row >= 0 && row < m_list.size()) ? m_list.at(row) : Reservation();
 }
 
+QVector<Reservation> ReserveTableModel::fromHttpArray(const QJsonArray &arr)
+{
+    QVector<Reservation> out;
+    out.reserve(arr.size());
+    for (const QJsonValue &v : arr) {
+        if (!v.isObject())
+            continue;
+        const QJsonObject o = v.toObject();
+        Reservation r;
+        r.ydId    = JsonUtil::asInt(o, QStringLiteral("yd_id"));
+        r.addr    = JsonUtil::asStr(o, QStringLiteral("addr"));
+        r.useDate = JsonUtil::asStr(o, QStringLiteral("use_date"));
+        out.append(r);
+    }
+    return out;
+}
+
 QVector<Reservation> ReserveTableModel::fromJson(const QJsonObject &resp)
 {
     QVector<Reservation> out;

@@ -1,15 +1,15 @@
 /*
- * M4 测试: TicketTableModel 单元测试 + 真实服务端查票(经 MainWindow 全链路)
- * 单元部分不需要服务端; 集成部分需要 127.0.0.1:6000 与种子数据(3 条车票)。
+ * M4/V1-M2 测试: TicketTableModel / ReserveTableModel 单元测试(不需要服务端)。
+ * 旧 liveViewThroughMainWindow(直连 TCP 全链路)已由 HTTP 形态的 flow_test 取代
+ * (真实服务端 -> 服务层 -> /tickets -> 模型)。
  */
 #include "tickettablemodel.h"
-#include "mainwindow.h"
-#include "tcpclient.h"
+#include "reservetablemodel.h"
 
 #include <QJsonArray>
 #include <QHeaderView>
+#include <QMainWindow>
 #include <QTableView>
-#include <QPushButton>
 #include <QtTest>
 
 class TestTicketModel : public QObject
@@ -20,8 +20,9 @@ private slots:
     void modelBasics();
     void resetNotifiesView();
     void fromJsonDefensive();
+    void fromHttpArrayDefensive();
+    void reserveModelFromHttpArray();
     void viewModelDestructionOrder();
-    void liveViewThroughMainWindow();
 
 private:
     static QJsonObject ticketJson(const char *id, const char *addr,
@@ -141,6 +142,46 @@ void TestTicketModel::fromJsonDefensive()
     qDebug("[PASS] fromJson 防御: 字符串/数字数值/缺失字段/脏元素/无 arr");
 }
 
+void TestTicketModel::fromHttpArrayDefensive()
+{
+    // 服务层 GET /tickets 的数组形态: 数字字段 + total/used 命名
+    QJsonArray arr;
+    QJsonObject o1;
+    o1.insert(QStringLiteral("tk_id"), 1);
+    o1.insert(QStringLiteral("addr"), QStringLiteral("西安-北京"));
+    o1.insert(QStringLiteral("total"), 100);
+    o1.insert(QStringLiteral("used"), 2);
+    o1.insert(QStringLiteral("use_date"), QStringLiteral("2026-10-01"));
+    arr.append(o1);
+    arr.append(QStringLiteral("garbage"));                    // 非对象跳过
+    const QVector<Ticket> ts = TicketTableModel::fromHttpArray(arr);
+    QCOMPARE(ts.size(), 1);
+    QCOMPARE(ts.at(0).tkId, 1);
+    QCOMPARE(ts.at(0).addr, QStringLiteral("西安-北京"));
+    QCOMPARE(ts.at(0).max, 100);                               // total -> max
+    QCOMPARE(ts.at(0).num, 2);                                 // used -> num
+    QCOMPARE(ts.at(0).useDate, QStringLiteral("2026-10-01"));
+    QVERIFY(TicketTableModel::fromHttpArray(QJsonArray()).isEmpty());
+    qDebug("[PASS] fromHttpArray: total/used 映射/脏元素/空数组");
+}
+
+void TestTicketModel::reserveModelFromHttpArray()
+{
+    QJsonArray arr;
+    QJsonObject o;
+    o.insert(QStringLiteral("yd_id"), 7);
+    o.insert(QStringLiteral("addr"), QStringLiteral("西安-上海"));
+    o.insert(QStringLiteral("use_date"), QStringLiteral("2026-10-02"));
+    arr.append(o);
+    const QVector<Reservation> rs = ReserveTableModel::fromHttpArray(arr);
+    QCOMPARE(rs.size(), 1);
+    QCOMPARE(rs.at(0).ydId, 7);
+    QCOMPARE(rs.at(0).addr, QStringLiteral("西安-上海"));
+    QCOMPARE(rs.at(0).useDate, QStringLiteral("2026-10-02"));
+    QVERIFY(ReserveTableModel::fromHttpArray(QJsonArray()).isEmpty());
+    qDebug("[PASS] ReserveTableModel::fromHttpArray: yd_id/addr/use_date");
+}
+
 void TestTicketModel::viewModelDestructionOrder()
 {
     // 复现窗口析构: model 与 view 同为窗口子对象, model 先创建(先销毁)
@@ -162,29 +203,6 @@ void TestTicketModel::viewModelDestructionOrder()
     model->setTickets(ts);
     QTest::qWait(50);
     qDebug("[PASS] 析构顺序用例执行完毕(未崩溃即通过)");
-}
-
-void TestTicketModel::liveViewThroughMainWindow()
-{
-    // 全链路: MainWindow.setSession -> refreshTickets(点按钮) -> 真实服务端 -> 模型更新
-    MainWindow w;
-    w.setSession(QStringLiteral("13800001111"), QStringLiteral("测试用户"));
-    w.client()->connectToHost(QStringLiteral("127.0.0.1"), 6000);
-    QTRY_VERIFY(w.client()->isConnected());
-
-    QTest::mouseClick(w.findChild<QPushButton *>(QStringLiteral("refreshBtn")), Qt::LeftButton);
-    QTRY_COMPARE(w.ticketModel()->rowCount(), 3);            // 种子数据 3 条
-    QCOMPARE(w.ticketModel()->data(w.ticketModel()->index(0, TicketTableModel::ColAddr)).toString(),
-             QStringLiteral("北京-上海"));
-    QCOMPARE(w.ticketModel()->data(w.ticketModel()->index(0, TicketTableModel::ColNum)).toInt(), 12);
-    QCOMPARE(w.ticketModel()->data(w.ticketModel()->index(2, TicketTableModel::ColAddr)).toString(),
-             QStringLiteral("北京-成都"));
-
-    // 等待期按钮禁用(防连点), 响应后恢复
-    QTest::mouseClick(w.findChild<QPushButton *>(QStringLiteral("refreshBtn")), Qt::LeftButton);
-    QVERIFY(!w.findChild<QPushButton *>(QStringLiteral("refreshBtn"))->isEnabled());
-    QTRY_VERIFY(w.findChild<QPushButton *>(QStringLiteral("refreshBtn"))->isEnabled());
-    qDebug("[PASS] 真实服务端全链路: 刷新按钮 -> 3 条车票入表, 等待期按钮禁用");
 }
 
 QTEST_MAIN(TestTicketModel)

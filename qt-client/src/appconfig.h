@@ -8,8 +8,13 @@
 //     不能用 inline 变量(那是 C++17 特性)
 namespace AppConfig {
 
+// C++ 票务服务端(TcpClient 直连形态仍在, 现由 Python 侧对接)
 constexpr const char *kServerHost = "127.0.0.1";
 constexpr quint16 kServerPort = 6000;
+
+// Agent 服务层(FastAPI)地址: V1-M2 起登录/表格/对话全部走它(Qt 不再直连 TCP)
+// 启动: python -m agent.service --port 8000
+constexpr const char *kApiBaseUrl = "http://127.0.0.1:8000";
 
 } // namespace AppConfig
 

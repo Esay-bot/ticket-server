@@ -1,11 +1,13 @@
 /*
- * TcpClient 集成测试(需真实服务端运行在 127.0.0.1:6000, 且库里有 M0 注册的账号)
- * 覆盖计划 M2 验收: 真实登录请求-响应往返, 日志打印收发内容
+ * TcpClient 集成测试(需真实服务端运行在 127.0.0.1:6000)
+ * 覆盖计划 M2 验收: 真实注册->登录请求-响应往返, 日志打印收发内容
  * 另测: 串行请求锁 / 错误密码 ERR / 连接被拒
+ * 账号自注册(随机 tel), 不依赖数据库种子数据。
  */
 #include "tcpclient.h"
 
 #include <QCoreApplication>
+#include <QDateTime>
 #include <QJsonDocument>
 #include <QTimer>
 #include <QDebug>
@@ -29,7 +31,7 @@ public:
         connect(cli, &TcpClient::connStateChanged, this, [this](bool up) {
             if (up) {
                 CHECK(true, "连接: connStateChanged(true), 服务器 127.0.0.1:6000");
-                stepLoginOk();
+                stepRegister();
             }
         });
         connect(cli, &TcpClient::errorOccurred, this, [this](const QString &r) {
@@ -57,11 +59,15 @@ public:
 private slots:
     void onJson(const QJsonObject &obj)
     {
-        if (step_ == StepLoginOk) {
+        if (step_ == StepRegister) {
+            CHECK(obj.value(QStringLiteral("status")).toString() == QStringLiteral("OK"),
+                  "注册(随机账号): status=OK");
+            stepLoginOk();
+        } else if (step_ == StepLoginOk) {
             CHECK(obj.value(QStringLiteral("status")).toString() == QStringLiteral("OK"),
                   "登录(正确密码): status=OK");
-            CHECK(obj.value(QStringLiteral("user_name")).toString() == QStringLiteral("测试用户"),
-                  "登录(正确密码): user_name=测试用户(中文往返正常)");
+            CHECK(obj.value(QStringLiteral("user_name")).toString() == m_name,
+                  "登录(正确密码): user_name 往返一致(中文正常)");
             stepLoginWrong();
         } else if (step_ == StepLoginWrong) {
             CHECK(obj.value(QStringLiteral("status")).toString() == QStringLiteral("ERR"),
@@ -71,19 +77,35 @@ private slots:
     }
 
 private:
-    enum Step { StepLoginOk, StepLoginWrong };
-    int step_ = StepLoginOk;
+    enum Step { StepRegister, StepLoginOk, StepLoginWrong };
+    int step_ = StepRegister;
+    QString m_tel;
+    QString m_name = QStringLiteral("网络测试用户");
+
+    void stepRegister()
+    {
+        // 随机账号: 不依赖 M0 时代注册的种子账号(库可能被重置)
+        m_tel = QStringLiteral("139%09d")
+            .arg(QDateTime::currentMSecsSinceEpoch() % 1000000000);
+        QJsonObject req;
+        req.insert(QStringLiteral("type"), 2);
+        req.insert(QStringLiteral("user_tel"), m_tel);
+        req.insert(QStringLiteral("user_name"), m_name);
+        req.insert(QStringLiteral("user_passwd"), QStringLiteral("123456"));
+        CHECK(cli->send(req), "发送注册请求: send 返回 true");
+
+        // 串行锁: 响应未到前再发应被拒绝(响应只能经事件循环到达, 此处必为 busy)
+        CHECK(!cli->send(req), "串行锁: 未收到响应前第二次 send 被拒绝");
+        step_ = StepRegister;
+    }
 
     void stepLoginOk()
     {
         QJsonObject req;
         req.insert(QStringLiteral("type"), 1);
-        req.insert(QStringLiteral("user_tel"), QStringLiteral("13800001111"));
+        req.insert(QStringLiteral("user_tel"), m_tel);
         req.insert(QStringLiteral("user_passwd"), QStringLiteral("123456"));
         CHECK(cli->send(req), "发送登录请求: send 返回 true");
-
-        // 串行锁: 响应未到前再发应被拒绝(响应只能经事件循环到达, 此处必为 busy)
-        CHECK(!cli->send(req), "串行锁: 未收到响应前第二次 send 被拒绝");
         step_ = StepLoginOk;
     }
 
@@ -92,7 +114,7 @@ private:
         step_ = StepLoginWrong;
         QJsonObject req;
         req.insert(QStringLiteral("type"), 1);
-        req.insert(QStringLiteral("user_tel"), QStringLiteral("13800001111"));
+        req.insert(QStringLiteral("user_tel"), m_tel);
         req.insert(QStringLiteral("user_passwd"), QStringLiteral("wrongpw"));
         CHECK(cli->send(req), "发送错误密码登录: send 返回 true");
     }

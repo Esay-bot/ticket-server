@@ -82,6 +82,25 @@ int TicketTableModel::rowOfTkId(int tkId) const
     return -1;
 }
 
+QVector<Ticket> TicketTableModel::fromHttpArray(const QJsonArray &arr)
+{
+    QVector<Ticket> out;
+    out.reserve(arr.size());
+    for (const QJsonValue &v : arr) {
+        if (!v.isObject())
+            continue;
+        const QJsonObject o = v.toObject();
+        Ticket t;
+        t.tkId    = JsonUtil::asInt(o, QStringLiteral("tk_id"));
+        t.addr    = JsonUtil::asStr(o, QStringLiteral("addr"));
+        t.max     = JsonUtil::asInt(o, QStringLiteral("total"));
+        t.num     = JsonUtil::asInt(o, QStringLiteral("used"));
+        t.useDate = JsonUtil::asStr(o, QStringLiteral("use_date"));
+        out.append(t);
+    }
+    return out;
+}
+
 QVector<Ticket> TicketTableModel::fromJson(const QJsonObject &resp)
 {
     QVector<Ticket> out;

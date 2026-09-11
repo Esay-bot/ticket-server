@@ -2,6 +2,7 @@
 #define TICKETTABLEMODEL_H
 
 #include <QAbstractTableModel>
+#include <QJsonArray>
 #include <QVector>
 #include <QJsonObject>
 
@@ -52,6 +53,10 @@ public:
 
     // 从查票响应 {status,num,arr:[...]} 解析车票数组(防御性: 字段缺失/类型不符容忍)
     static QVector<Ticket> fromJson(const QJsonObject &resp);
+
+    // 从服务层 GET /tickets 的 tickets 数组解析(V1-M2 数据源换 HTTP;
+    // 字段为 total/used 数字, JsonUtil::asInt 同时兼容字符串形态)
+    static QVector<Ticket> fromHttpArray(const QJsonArray &arr);
 
 private:
     QVector<Ticket> m_tickets;

@@ -1,6 +1,5 @@
 #include "logindialog.h"
-#include "tcpclient.h"
-#include "appconfig.h"
+#include "apiclient.h"
 
 #include <QFormLayout>
 #include <QHBoxLayout>
@@ -9,8 +8,8 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 
-LoginDialog::LoginDialog(TcpClient *client, QWidget *parent)
-    : QDialog(parent), m_client(client)
+LoginDialog::LoginDialog(ApiClient *api, QWidget *parent)
+    : QDialog(parent), m_api(api)
 {
     setWindowTitle(QStringLiteral("票务预约系统 - 登录"));
     setMinimumWidth(360);
@@ -49,7 +48,7 @@ LoginDialog::LoginDialog(TcpClient *client, QWidget *parent)
     btns->addWidget(m_primaryBtn, 1);
     btns->addWidget(m_switchBtn);
 
-    m_statusLabel = new QLabel(QStringLiteral("正在连接服务器..."), this);
+    m_statusLabel = new QLabel(QStringLiteral("正在连接 Agent 服务..."), this);
     m_statusLabel->setObjectName(QStringLiteral("statusLabel"));
     m_statusLabel->setWordWrap(true);
 
@@ -63,18 +62,16 @@ LoginDialog::LoginDialog(TcpClient *client, QWidget *parent)
     connect(m_primaryBtn, &QPushButton::clicked, this, &LoginDialog::onPrimaryAction);
     connect(m_switchBtn, &QPushButton::clicked, this, &LoginDialog::onSwitchMode);
 
-    // 响应/错误/连接状态都来自共享的 TcpClient, 对话框存活期间它是唯一请求发起方
-    connect(m_client, &TcpClient::jsonReceived, this, &LoginDialog::onJsonReceived);
-    connect(m_client, &TcpClient::errorOccurred, this, &LoginDialog::onConnError);
-    connect(m_client, &TcpClient::connStateChanged, this, &LoginDialog::onConnStateChanged);
+    // 应答/探活结果来自共享的 ApiClient, 信号在 UI 线程回槽
+    connect(m_api, &ApiClient::healthChecked, this, &LoginDialog::onHealthChecked);
+    connect(m_api, &ApiClient::loginFinished, this, &LoginDialog::onLoginFinished);
 }
 
 void LoginDialog::showEvent(QShowEvent *e)
 {
     QDialog::showEvent(e);
-    // 首次显示即发起连接(重复调用由 TcpClient 内部去重)
-    if (!m_client->isConnected())
-        m_client->connectToHost(AppConfig::kServerHost, AppConfig::kServerPort);
+    // 首次显示即探活: 服务层没起时直接告诉用户怎么起, 而不是等点登录才报错
+    m_api->checkHealth();
 }
 
 void LoginDialog::applyMode()
@@ -88,7 +85,7 @@ void LoginDialog::applyMode()
     m_primaryBtn->setText(m_registerMode ? QStringLiteral("注册并登录")
                                          : QStringLiteral("登录"));
     m_switchBtn->setText(m_registerMode ? QStringLiteral("已有账号？返回登录")
-                                         : QStringLiteral("没有账号？注册"));
+                                        : QStringLiteral("没有账号？注册"));
     adjustSize();
 }
 
@@ -126,35 +123,18 @@ void LoginDialog::onPrimaryAction()
     if (m_waiting)
         return;                       // 等待态防连点(按钮已禁用, 双保险)
 
-    if (!validateInput())             // 输入校验不依赖连接状态, 先做
+    if (!validateInput())             // 输入校验纯本地, 先做
         return;
 
-    if (!m_client->isConnected()) {
-        m_statusLabel->setText(QStringLiteral("尚未连接服务器，正在连接，请稍候重试"));
-        m_client->connectToHost(AppConfig::kServerHost, AppConfig::kServerPort);
-        return;
-    }
-
-    QJsonObject req;
     if (m_registerMode) {
-        req.insert(QStringLiteral("type"), 2);
-        req.insert(QStringLiteral("user_tel"), m_phoneEdit->text().trimmed());
-        req.insert(QStringLiteral("user_name"), m_nameEdit->text().trimmed());
-        req.insert(QStringLiteral("user_passwd"), m_passEdit->text());
+        m_api->registerUser(m_phoneEdit->text().trimmed(),
+                            m_nameEdit->text().trimmed(), m_passEdit->text());
+        m_statusLabel->setText(QStringLiteral("正在注册(成功后自动登录)..."));
     } else {
-        req.insert(QStringLiteral("type"), 1);
-        req.insert(QStringLiteral("user_tel"), m_phoneEdit->text().trimmed());
-        req.insert(QStringLiteral("user_passwd"), m_passEdit->text());
+        m_api->login(m_phoneEdit->text().trimmed(), m_passEdit->text());
+        m_statusLabel->setText(QStringLiteral("正在登录..."));
     }
-
-    if (!m_client->send(req)) {
-        m_statusLabel->setText(QStringLiteral("发送失败，请重试"));
-        return;
-    }
-    m_pendingReq = m_registerMode ? 2 : 1;
     setWaiting(true);
-    m_statusLabel->setText(m_registerMode ? QStringLiteral("正在注册...")
-                                          : QStringLiteral("正在登录..."));
 }
 
 void LoginDialog::onSwitchMode()
@@ -165,60 +145,29 @@ void LoginDialog::onSwitchMode()
                                           : QStringLiteral("输入手机号和密码登录"));
 }
 
-void LoginDialog::onJsonReceived(const QJsonObject &obj)
-{
-    if (m_pendingReq == 0)
-        return;                       // 不属于本对话框的响应
-
-    const QString status = obj.value(QStringLiteral("status")).toString();
-    setWaiting(false);
-
-    if (m_pendingReq == 1) {          // 登录响应
-        if (status == QStringLiteral("OK")) {
-            m_userName = obj.value(QStringLiteral("user_name")).toString();
-            m_userTel = m_phoneEdit->text().trimmed();
-            accept();                 // 关闭对话框, 主窗口接管连接
-            return;
-        }
-        m_statusLabel->setText(status == QStringLiteral("ERR")
-                                   ? QStringLiteral("登录失败：手机号或密码错误")
-                                   : QStringLiteral("登录响应异常(status=%1)").arg(status));
-    } else if (m_pendingReq == 2) {   // 注册响应
-        if (status == QStringLiteral("OK")) {
-            // 注册成功自动登录(与服务端行为对齐: 账号即刻可用)
-            m_statusLabel->setText(QStringLiteral("注册成功，正在自动登录..."));
-            QJsonObject loginReq;
-            loginReq.insert(QStringLiteral("type"), 1);
-            loginReq.insert(QStringLiteral("user_tel"), m_phoneEdit->text().trimmed());
-            loginReq.insert(QStringLiteral("user_passwd"), m_passEdit->text());
-            if (m_client->send(loginReq)) {
-                m_pendingReq = 1;
-                setWaiting(true);
-                return;
-            }
-            m_statusLabel->setText(QStringLiteral("注册成功，自动登录发送失败，请手动登录"));
-        } else if (status == QStringLiteral("ERR")) {
-            m_statusLabel->setText(QStringLiteral("注册失败：手机号可能已被注册"));
-        } else {
-            m_statusLabel->setText(QStringLiteral("注册响应异常(status=%1)").arg(status));
-        }
-    }
-    m_pendingReq = 0;
-}
-
-void LoginDialog::onConnError(const QString &reason)
-{
-    if (m_waiting) {
-        setWaiting(false);
-        m_pendingReq = 0;
-        m_statusLabel->setText(QStringLiteral("请求失败：%1").arg(reason));
-    }
-}
-
-void LoginDialog::onConnStateChanged(bool up)
+void LoginDialog::onHealthChecked(bool up, const QString &message)
 {
     if (m_waiting)
-        return;                       // 等待期间的状态翻转由错误回调处理
-    m_statusLabel->setText(up ? QStringLiteral("已连接服务器，请登录")
-                              : QStringLiteral("与服务器断开"));
+        return;                       // 等待登录应答期间不被探活结果覆盖
+    m_statusLabel->setText(up ? QStringLiteral("已连接 Agent 服务，请登录") : message);
+}
+
+void LoginDialog::onLoginFinished(bool ok, const QString &message)
+{
+    setWaiting(false);
+    if (ok) {
+        accept();                     // 会话信息(session_id/用户名)在 ApiClient 里
+        return;
+    }
+    m_statusLabel->setText(message);  // 服务层的人话错误: 401 密码错/409 已注册/503 后端不可达
+}
+
+QString LoginDialog::userName() const
+{
+    return m_api->userName();
+}
+
+QString LoginDialog::userTel() const
+{
+    return m_api->userTel();
 }

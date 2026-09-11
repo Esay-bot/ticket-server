@@ -56,7 +56,7 @@ python -m agent.main --debug        # 登录后自然语言对话
 # 3) HTTP 服务层(Qt 桌面端 / 其他前端用, 见《Qt+Agent桌面端开发计划》):
 python -m agent.service --port 8000 # 默认对接 127.0.0.1:6000 的 C++ 服务端
 #   curl http://127.0.0.1:8000/health
-#   POST /login /register → {session_id, user_name};  GET /tickets?session_id=...
+#   POST /login /register → {session_id, user_name};  GET /tickets /reservations?session_id=...
 #   POST /chat {session_id, text} → {reply, tool_trace, usage, confirm_request}
 #   POST /logout;  会话空闲 30 分钟自动清理; 缺 API Key 时登录/查票不受影响, /chat 返回 503 人话提示
 ```
