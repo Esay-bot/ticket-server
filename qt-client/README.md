@@ -1,44 +1,42 @@
 # 票务预约系统 · Qt 图形客户端
 
-Agent 桌面演示端（登录 / 车票与预约表格 / **AI 助手对话**，见《Qt+Agent桌面端开发计划》）。
-V1-M2 起**不再直连 C++ 服务端 TCP**：登录、表格数据全部经 FastAPI 服务层（`agent/service.py`）走 HTTP，
-会话的 TCP 连接与登录态住在 Python 侧 —— 界面与 Agent 解耦，以后换 Web 前端零成本。
+替换 `client/` 旧命令行客户端的 Qt 5 图形客户端（登录 / 查票 / 预约 / 取消 / 断线重连）。
 
-## 架构（V1-M2 起）
+## 架构
 
 ```
-┌────────────────────── Qt 客户端(本目录) ───────────────────────┐
-│  LoginDialog(登录/注册)  MainWindow(页签: 车票/我的预约)        │
-│        │                        │                             │
-│        ▼        共用             ▼                             │
-│  ┌──────────────────────────────────────────┐                 │
-│  │ ApiClient (QNetworkAccessManager 封装)    │                 │
-│  │  /login /register /tickets /reservations  │                 │
-│  │  /chat(V1-M3) /logout /health             │                 │
-│  │  错误人话化: 服务层未启动 -> 提示启动命令;   │                 │
-│  │  4xx/5xx -> 直接展示服务层 {"detail":...}  │                 │
-│  └──────────────┬───────────────────────────┘                 │
-└─────────────────┼─────────────────────────────────────────────┘
-                  │ HTTP + JSON (默认 http://127.0.0.1:8000)
-┌─────────────────▼─────────────────────────────────────────────┐
-│ FastAPI 服务层(agent/service.py): 会话字典+TTL, 错误分级        │
-└─────────────────┬─────────────────────────────────────────────┘
-                  │ TCP(自研 4 字节长度头+JSON 协议, 由 Python 侧对接)
-┌─────────────────▼─────────────────────────────────────────────┐
-│ C++ libevent 服务端(../server, 零改动) ⇄ MySQL                  │
-└───────────────────────────────────────────────────────────────┘
+┌────────────────────────── Qt 客户端(本目录) ──────────────────────────┐
+│                                                                      │
+│  界面层(qt widgets, 全部主线程)                                       │
+│  ┌────────────┐  ┌──────────────────────────────────────────────┐   │
+│  │ LoginDialog │  │ MainWindow                                   │   │
+│  │ 登录/注册    │  │ ┌────────────────────────────────────────┐  │   │
+│  └──────┬──────┘  │ │ TicketTableModel ── QTableView(车票列表) │  │   │
+│         │  共用    │ │ ReserveTableModel ─ QTableView(我的预约) │  │   │
+│         ▼  一条    │ └────────────────────────────────────────┘  │   │
+│  ┌──────────────┐  │ 按钮: 刷新/预约/我的预约/取消/重连 + 状态栏   │   │
+│  │  TcpClient   │◄─└──────────────────────────────────────────────┘   │
+│  │ (QTcpSocket   │   串行请求锁: 同一时刻只允许一个未完成请求          │
+│  │  组合封装)    │   (服务端一问一答且响应不回显 type, 并发无法配对)   │
+│  └──────┬───────┘                                                  │
+│         │ readyRead → readAll → feed()                              │
+│  ┌──────▼───────────┐                                              │
+│  │ ProtocolCodec    │ 4 字节大端长度头 + JSON, 缓冲拆包(半包/粘包)    │
+│  └──────┬───────────┘                                              │
+└─────────┼────────────────────────────────────────────────────────────┘
+          │ TCP 127.0.0.1:6000
+┌─────────▼────────────────────────────────────────────────────────────┐
+│ 服务端(../server): libevent 单线程 IO + 4 线程线程池 + MySQL(Project_DB) │
+└───────────────────────────────────────────────────────────────────────┘
 ```
 
 设计要点：
 
-- **V2-M2 三栏布局**：左（车票/我的预约页签）｜中（AI 助手聊天流，SSE 打字机增量渲染）｜右（执行轨迹面板：工具调用/门控拦截/token 计数实时滚动）。
-- **手动"预约/取消"按钮已移除**：危险操作只能经对话发起（Agent 确认门控），界面上不存在绕过门控的捷径。
-- **全部异步**：`QNetworkAccessManager` 发请求，信号回 UI 线程刷新表格/状态栏，界面永不阻塞。
-- **会话**：`session_id` 由 `ApiClient` 持有；"退出登录"调 `/logout`（服务层关 TCP）后关窗，
-  `main.cpp` 循环重新弹登录 —— 覆盖"断网重启服务后重新登录继续"场景。
-- **Model/View**：`QAbstractTableModel` 子类存结构体数组，整表替换走 `beginResetModel/endResetModel`；
-  数据源适配 `fromHttpArray`（服务层 JSON 形态）。
-- 旧直连 TCP 形态（`TcpClient`/`ProtocolCodec`）保留在源码与 codec/net 测试中，作为协议层实现与对照。
+- **信号驱动，无手写收发线程**：`QTcpSocket` 本身异步（`readyRead`/`connected`/`disconnected`），UI 与网络同在主线程。
+- **串行请求锁**：`TcpClient::send()` 后置 `busy_`，收到响应/超时/出错解锁；期间 `send()` 返回 false。
+- **响应关联**：界面层用 `m_pendingReq` 记录当前请求 type，`jsonReceived` 到达时按它分发。
+- **5 秒响应超时**：`QTimer` 单发实现（等价旧客户端 `SO_RCVTIMEO`）。
+- **Model/View**：`QAbstractTableModel` 子类存结构体数组，整表替换走 `beginResetModel/endResetModel`。
 
 ## 目录结构
 
@@ -46,19 +44,17 @@ V1-M2 起**不再直连 C++ 服务端 TCP**：登录、表格数据全部经 Fas
 qt-client/
 ├── ticket-client.pro        # qmake 工程
 ├── src/
-│   ├── main.cpp             # 入口: 加载 QSS → 登录(退出可重登循环)
-│   ├── appconfig.h          # 服务层/服务端地址(单点定义)
-│   ├── apiclient.{h,cpp}    # V1-M2 服务层 HTTP 客户端(核心)
-│   ├── logindialog.{h,cpp}  # 登录/注册对话框(走 /login /register, 含探活提示)
-│   ├── tickettablemodel.{h,cpp} # 车票表模型(fromJson 直连形态 + fromHttpArray)
-│   ├── reservetablemodel.{h,cpp}# 我的预约表模型(同上)
-│   ├── jsonutil.h           # 防御性 JSON 取值(兼容字符串/数字数值)
-│   ├── mainwindow.{h,cpp}   # 主窗口: 页签/刷新/退出登录
-│   ├── protocolcodec.{h,cpp}# M1 协议编解码(旧直连形态, 测试用)
-│   └── tcpclient.{h,cpp}    # M2 网络层封装(旧直连形态, 测试用)
-├── res/style.qss            # 统一样式(qrc 资源打包)
-├── scripts/build_and_test.sh# 一键构建并运行全部测试(WSL)
-└── tests/                   # 五套自动化测试(见下)
+│   ├── main.cpp             # 入口: 加载 QSS → 登录 → 主窗口
+│   ├── appconfig.h          # 服务端地址(单点定义)
+│   ├── protocolcodec.{h,cpp}# M1 协议编解码(核心)
+│   ├── tcpclient.{h,cpp}    # M2 网络层封装(核心)
+│   ├── logindialog.{h,cpp}  # M3 登录/注册对话框
+│   ├── tickettablemodel.{h,cpp} # M4 车票表模型(核心)
+│   ├── reservetablemodel.{h,cpp}# M5 我的预约表模型
+│   ├── jsonutil.h           # 防御性 JSON 取值(服务端数值字段是字符串)
+│   └── mainwindow.{h,cpp}   # 主窗口: 页签/操作区/断线重连状态机
+├── res/style.qss            # M6 统一样式(qrc 资源打包)
+└── tests/                   # 四套自动化测试(见下)
 ```
 
 ## 编译与启动（WSL / Linux）
@@ -69,23 +65,18 @@ qt-client/
 sudo apt install -y g++ qtbase5-dev libevent-dev libjsoncpp-dev \
                     default-libmysqlclient-dev mysql-server fonts-noto-cjk
 mysql -u root -p < server/sql/init.sql     # 建库 Project_DB + 种子数据
+# 服务端连接参数: 127.0.0.1:3306 root/211925(见 server/ser.cpp)
 ./build.sh                                  # 编译 server/ser 与 client/cli
-pip3 install --user --break-system-packages fastapi uvicorn httpx   # WSL 侧服务层依赖
+./server/ser &                              # 启动服务端(监听 127.0.0.1:6000)
 ```
 
-每次开发前启动（顺序）：
+编译运行 Qt 客户端：
 
 ```bash
-# 1) WSL 里起后端
-sudo service mysql start && cd ~/ser-cli/server && ./ser      # :6000
-
-# 2) WSL 里起 Agent 服务层(或 Windows 侧: python -m agent.service)
-python3 -m agent.service --port 8000                           # :8000
-
-# 3) 编译运行 Qt 客户端
-cd qt-client && mkdir -p build && cd build
+cd qt-client
+mkdir -p build && cd build
 qmake ../ticket-client.pro && make -j$(nproc)
-./ticket-client        # WSLg 直接弹窗; 服务层没起会在登录框直接提示启动命令
+./ticket-client        # WSLg 直接弹窗; 远程 Linux 需配置 X11 转发
 ```
 
 Windows 注意：本机两套 Qt(Anaconda 5.15.2 / Qt 5.12.4)均为 MSVC ABI 且无配套编译器，
@@ -112,38 +103,32 @@ Windows 注意：本机两套 Qt(Anaconda 5.15.2 / Qt 5.12.4)均为 MSVC ABI 且
 
 ## 测试
 
+全部对真实服务端运行（先启动 MySQL + `./server/ser`）：
+
 ```bash
-# 一键构建并运行全部(WSL, 需 C++ 服务端 :6000 已启动; HTTP 测试自行拉起服务层):
-bash scripts/build_and_test.sh
-# 或单跑: cd tests/<name>/build && qmake ../<name>.pro && make && ./<name>
+cd qt-client/tests/<name> && mkdir -p build && cd build
+qmake ../<name>.pro && make -j && ./<name>          # dialog/model/flow 加 QT_QPA_PLATFORM=offscreen
 ```
 
 | 套件 | 覆盖 |
 |---|---|
-| codec_test | 半包/粘包/非法长度/坏 JSON 等 20 项断言（无需服务端, 旧直连形态） |
-| net_test | 真实注册→登录往返、串行锁、错误密码、连接被拒（自注册随机账号） |
-| model_test | 模型角色与 reset 信号、fromJson/fromHttpArray 防御（无需服务端） |
-| dialog_test | HTTP 登录成功/错误密码 401/重复注册 409/空值/密码不一致/等待态防连点/**服务层未启动提示**（自拉起服务层+自注册账号） |
-| flow_test | 登录→/tickets→/reservations 表格链路、退出登录会话销毁、kill 服务层→"请先启动 agent 服务"提示 |
-| chat_test | **V1-M3 验收**：回复/轨迹行/确认卡片渲染、卡片按钮=等价文本、旧卡片陈旧化（无 Key）；`DEEPSEEK_API_KEY` 存在时加跑真实全场景（查票→订票出卡→点确认→预约成立→查预约→取消出卡→点确认→清空，及"不订了"零预订） |
+| codec_test | 半包/粘包/非法长度/坏 JSON 等 20 项断言（无需服务端） |
+| net_test | 真实登录往返、串行锁、错误密码、连接被拒 |
+| dialog_test | 登录成功/错误密码/重复注册/空值/密码不一致/等待态防连点 |
+| model_test | 模型角色与 reset 信号、fromJson 防御、真实查票入表 |
+| flow_test | 完整业务闭环 + kill 服务端断线/重连恢复（会重启服务端进程） |
 
 ## 已知限制
 
 - 服务端明文密码、SQL 字符串拼接（仅本地开发，`db_manager.cpp` 有注释）。
-- 无心跳保活；服务层会话空闲 30 分钟被清理（TTL），之后需重新登录。
+- 无心跳保活；空闲连接异常断开只能等下次收发时发现。
+- 响应不含失败原因，客户端提示只能按操作类型笼统给出。
+- 服务端单实例（监听单端口、无会话 token，tel 即身份）。
 - 查票无分页，车票量大时整表刷新。
 
-## 3 分钟演示脚本（录屏用, V1 功能闭环版）
+## 3 分钟演示脚本（录屏用）
 
-前置：起 C++ 服务端 + 服务层（`DEEPSEEK_API_KEY` 已 export），运行 `./ticket-client`。
-
-1. **登录**（30s）：先不起服务层启动一次 → 登录框直接提示"请先启动 python -m agent.service"
-   → 起服务层重开 → 输错密码一次（401 人话提示）→ 正确登录进入"AI 助手"页签。
-2. **查票**（30s）：输入"有哪些票" → 回复班次清单，消息下方灰色小字显示
-   `└ 工具: query_tickets(成功)` —— Function Calling 可见；"车票列表"页签同步刷新。
-3. **订票 + 确认门控（主角）**（60s）：输入"订10月1日去北京的" → 出现**确认卡片**
-   （复述：班次/日期/余票/账号 + [确认预订] [不订了]）→ 讲解"模型只能请求，用户点击才放行"
-   → 点[确认预订] → 预订成功，车票表"已预约"+1、"我的预约"出现 1 条。
-4. **查预约 + 取消闭环**（45s）：输入"我订了哪些预约" → 列出 → "取消我的预约" → 出取消卡片
-   → 点[确认取消] → 预约清空、余票复原。
-5. **拒绝路径**（15s）：再订一班 → 点[不订了] → 无任何预订产生（门控不放行的证据）。
+1. **登录**（30s）：启动 `./ticket-client` → 输错密码一次（提示）→ 正确登录进入主界面，车票自动加载。
+2. **查票/预约**（60s）：点"刷新" → 选中"北京-上海"行 → 点"预约选中车票" → 状态栏"预约成功 · 共 1 条预约记录"，车票表已预约数 +1。
+3. **我的预约/取消**（45s）：切到"我的预约"页签 → 选中 → "取消选中预约" → 数量复原、列表清空。
+4. **断线重连**（45s）：终端 `pkill -x ser` → 界面提示"已断线"、按钮全灰仅"重连"可点 → `./server/ser &` 重启 → 点"重连" → 车票自动恢复。

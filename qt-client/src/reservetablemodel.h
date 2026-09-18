@@ -2,7 +2,6 @@
 #define RESERVETABLEMODEL_H
 
 #include <QAbstractTableModel>
-#include <QJsonArray>
 #include <QVector>
 #include <QJsonObject>
 
@@ -39,9 +38,6 @@ public:
 
     // 从"我的预约"响应 {status,num,arr:[{yd_id,addr,use_date}]} 解析(防御性)
     static QVector<Reservation> fromJson(const QJsonObject &resp);
-
-    // 从服务层 GET /reservations 的 reservations 数组解析(V1-M2 数据源换 HTTP)
-    static QVector<Reservation> fromHttpArray(const QJsonArray &arr);
 
 private:
     QVector<Reservation> m_list;

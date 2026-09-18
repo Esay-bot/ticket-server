@@ -15,15 +15,11 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
     loadStyleSheet(a);
 
-    // "退出登录"关窗后重新走登录流程(会话在服务层已被 /logout 销毁,
-    // 重登拿到新 session_id) —— 覆盖断网重启服务后重新登录的验收场景
-    while (true) {
-        MainWindow w;
-        if (!w.login())                 // 未登录/取消则直接退出
-            return 0;
-        w.show();
-        a.exec();
-        if (!w.reloginRequested())
-            return 0;
-    }
+    MainWindow w;
+    if (!w.login())     // 未登录/取消则直接退出
+        return 0;
+    w.show();
+    w.raise();              // WSLg: 强制置前, 避免窗口藏在其他应用后
+    w.activateWindow();
+    return a.exec();
 }
